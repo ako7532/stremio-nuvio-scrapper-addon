@@ -119,4 +119,7 @@ These items prevent Phase 0 from being called fully complete:
 - SKTorrent direct-torrent normalization may proceed with mandatory downloaded-metainfo verification.
   Webshare's provider layer and late resolver contract may proceed, but connecting authenticated
   playback and all TorBox mutation work still require sanitized credential-backed fixtures.
-- Search handlers must remain side-effect free. TorBox create and precache operations belong only in the playback resolver.
+- Phase 5 aggregation keeps search handlers side-effect free: providers settle independently, Webshare
+  temporary links are not generated during search, and only an injected opaque addon play URL may enter
+  a formatted Webshare stream response.
+- TorBox create and precache operations belong only in the playback resolver.

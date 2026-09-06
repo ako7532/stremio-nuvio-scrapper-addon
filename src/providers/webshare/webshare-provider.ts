@@ -33,12 +33,6 @@ const normalizeFile = (file: WebshareFile, query: SearchQuery): FileProviderResu
     title: file.name,
     releaseName: file.name,
     mediaType: query.type,
-    ...(query.type === 'series'
-      ? {
-          season: query.season,
-          ...(query.episode === undefined ? {} : { episode: query.episode }),
-        }
-      : {}),
     filename: file.name,
     sizeBytes: file.sizeBytes,
     providerUrl: file.providerUrl,

@@ -31,6 +31,8 @@ export type UserConfiguration = {
     sources: readonly SourceType[];
     videoCodecs: readonly VideoCodec[];
     dynamicRanges: readonly DynamicRange[];
+    minimumSizeBytes?: number;
+    maximumSizeBytes?: number;
     minimumSeeders: number;
     includeTerms: readonly string[];
     excludeTerms: readonly string[];

@@ -43,4 +43,40 @@ describe('Webshare provider', () => {
     });
     expect(resolvePlayback).not.toHaveBeenCalled();
   });
+
+  it('does not treat requested series coordinates as provider-confirmed metadata', async () => {
+    const source: WebshareSource = {
+      search: vi.fn().mockResolvedValue([
+        {
+          id: '5m56ZO4cb6',
+          name: 'Example.Show.S01E02.1080p.mkv',
+          type: 'mkv',
+          sizeBytes: 1_000,
+          available: true,
+          passwordProtected: false,
+          removed: false,
+          copyrighted: false,
+          streamable: true,
+          providerUrl: 'https://webshare.cz/#/file/5m56ZO4cb6',
+        },
+      ]),
+      resolvePlayback: vi.fn(),
+    };
+    const provider = createWebshareProvider(source);
+
+    const [result] = await provider.search(
+      {
+        type: 'series',
+        value: 'Example Show S01E01',
+        title: 'Example Show',
+        season: 1,
+        episode: 1,
+        seasonPack: false,
+      },
+      { signal: new AbortController().signal, correlationId: 'test' },
+    );
+
+    expect(result).not.toHaveProperty('season');
+    expect(result).not.toHaveProperty('episode');
+  });
 });

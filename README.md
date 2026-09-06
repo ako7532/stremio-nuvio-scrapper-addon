@@ -3,9 +3,11 @@
 An early-stage, self-hosted Stremio protocol addon designed to aggregate normalized stream results from SKTorrent and Webshare, with optional TorBox resolution.
 
 The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation,
-fixture-backed Phase 3 SKTorrent provider, and Phase 4 Webshare provider layer. The server exposes a
-valid manifest, health endpoint, and an empty stream response until provider aggregation is connected
-in Phase 5. The manifest will advertise configuration support only once the configure route exists.
+fixture-backed Phase 3 SKTorrent provider, Phase 4 Webshare provider layer, and Phase 5 aggregation
+pipeline. The server exposes a valid manifest and health endpoint; its stream route accepts the
+aggregation use case through dependency injection while production provider/configuration wiring
+remains deferred until secure per-user configuration exists. The manifest will advertise configuration
+support only once the configure route exists.
 
 ## Requirements
 
@@ -53,10 +55,16 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - Official-API Webshare search, file metadata, and availability lookups with validated XML fixtures
 - Isolated Webshare salt/login credential service and late playback-link resolver
 - Normalized Webshare file results with bounded metadata concurrency
+- Parallel provider orchestration with isolated provider/query failures
+- Provider-specific deduplication followed by hard filters and optional cache enrichment
+- Deterministic configurable ranking and post-ranking per-resolution/total limits
+- Compact and detailed Stremio formatting for direct torrents and opaque Webshare play URLs
+- Strict parsing of standard Stremio movie and series stream identifiers
 
-Provider aggregation, addon-owned playback routes, and TorBox mutations remain intentionally
+Production dependency wiring, addon-owned playback routes, and TorBox mutations remain intentionally
 unimplemented. Webshare's authenticated login/link flow is credential-backed and verified at the
-provider boundary; connecting it to playback belongs to Phase 5.
+provider boundary; Phase 5 accepts an opaque play-URL factory without resolving temporary links during
+search.
 An authenticated, sanitized fixture proves that the observed 40-character SKTorrent detail identifier
 matches the BitTorrent v1 info hash. Torrent metadata parsing still verifies that equality before it may
 emit an `infoHash` or magnet URI; page identifiers are never trusted without the downloaded metainfo.

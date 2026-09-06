@@ -25,7 +25,24 @@ provider results -> normalize -> parse -> match -> deduplicate -> hard filters
                  -> total limit -> Stremio formatting
 ```
 
-Providers will be isolated with timeouts and settled independently. One failed provider must not discard successful results from another.
+The `SearchStreams` use case runs enabled providers in parallel and processes each provider's query
+variants sequentially. Every query and provider settles independently, so one failure does not discard
+successful results. Cancellation is the exception and propagates to the caller. Matching happens before
+provider-specific deduplication; hard filters run before an optional cache enricher; ranking is a
+lexicographic comparison of the configured factors with explicit identity tie-breakers. Per-resolution
+limits are applied before the total limit.
+The total limit also has a server-side cap of 100 results.
+
+The HTTP stream route parses standard IMDb movie IDs and `id:season:episode` series IDs, then delegates
+to an injected `SearchStreams` implementation. This keeps provider credentials and future per-user
+configuration outside the transport layer. Without that production wiring, the route preserves the
+valid empty stream response used by the skeleton.
+
+Stream formatting is the last pipeline stage. Direct SKTorrent mode emits a verified `infoHash`;
+TorBox-only results and multi-file series results without a selected filename stay hidden until Phase 6
+supplies its resolver. Webshare results enter ranking and limits only when an addon-owned play-URL
+factory is available. Formatting accepts only an HTTPS URL from that factory and never asks Webshare
+for a temporary media link during search.
 
 ## Playback safety
 

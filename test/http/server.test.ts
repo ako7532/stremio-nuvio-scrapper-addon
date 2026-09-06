@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildServer } from '../../src/http/server.js';
+import type { SearchStreams } from '../../src/application/search-streams.js';
 
 const servers: ReturnType<typeof buildServer>[] = [];
 
@@ -49,6 +50,41 @@ describe('Stremio HTTP contract', () => {
       method: 'GET',
       url: '/stream/channel/example.json',
     });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('parses a standard series identifier and delegates to the search use case', async () => {
+    const search = vi
+      .fn<SearchStreams['search']>()
+      .mockResolvedValue([{ name: 'Test', title: 'Result', infoHash: 'a'.repeat(40) }]);
+    const searchStreams: SearchStreams = {
+      search,
+    };
+    const server = buildServer({ searchStreams });
+    servers.push(server);
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/stream/series/tt1234567:0:4.json',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(search).toHaveBeenCalledOnce();
+    const call = search.mock.calls[0];
+    expect(call?.[0]).toEqual({ type: 'series', id: 'tt1234567', season: 0, episode: 4 });
+    expect(call?.[1].correlationId).toEqual(expect.any(String));
+    expect(call?.[1].signal).toBeInstanceOf(AbortSignal);
+    expect(response.json()).toEqual({
+      streams: [{ name: 'Test', title: 'Result', infoHash: 'a'.repeat(40) }],
+    });
+  });
+
+  it('rejects a series identifier without season and episode components', async () => {
+    const server = buildServer();
+    servers.push(server);
+
+    const response = await server.inject({ method: 'GET', url: '/stream/series/tt1234567.json' });
 
     expect(response.statusCode).toBe(400);
   });
