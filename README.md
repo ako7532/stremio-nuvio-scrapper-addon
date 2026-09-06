@@ -1,0 +1,1 @@
+# stremio-nuvio-scrapper-addon
