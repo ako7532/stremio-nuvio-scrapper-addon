@@ -150,7 +150,7 @@ describe('SearchStreams', () => {
         sktorrent: { enabled: true, playbackMode: 'torbox-only' },
         webshare: { enabled: false },
       },
-      torbox: { showUncached: false, precacheCount: 0 },
+      torbox: { showUncached: false, precacheCount: 2 },
     };
     const searchStreams = createSearchStreams({
       metadataResolver,
@@ -170,6 +170,7 @@ describe('SearchStreams', () => {
     expect(streams[0]).not.toHaveProperty('infoHash');
     expect(torboxPlaybackUrl).toHaveBeenCalledOnce();
     expect(torboxPlaybackUrl.mock.calls[0]?.[1]).toEqual({ type: 'movie', id: 'tt0807840' });
+    expect(torboxPlaybackUrl.mock.calls[0]?.[2]).toHaveLength(3);
   });
 });
 

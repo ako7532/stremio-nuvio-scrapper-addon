@@ -1,13 +1,32 @@
 import { randomBytes } from 'node:crypto';
 
 import type { MediaRequest } from '../domain/media.js';
-import type { TorrentProviderResult } from '../domain/release.js';
+import type { Resolution, TorrentProviderResult } from '../domain/release.js';
+
+export type PrecacheCandidate = {
+  result: TorrentProviderResult;
+  matchScore: number;
+};
+
+export type PlaybackPrecachePolicy = {
+  count: number;
+  minimumMatchScore: number;
+  minimumSeeders: number;
+  maximumTorrentSizeBytes?: number;
+  maximumTotalSizeBytes?: number;
+  allowedResolutions: readonly Resolution[];
+  preferredAudioLanguages: readonly string[];
+  preferredSubtitleLanguages: readonly string[];
+  preferredLanguagesOnly: boolean;
+};
 
 export type PlaybackReference = {
   id: string;
   configId: string;
   result: TorrentProviderResult;
   media: MediaRequest;
+  precacheCandidates: readonly PrecacheCandidate[];
+  precachePolicy: PlaybackPrecachePolicy;
   expiresAt: number;
 };
 

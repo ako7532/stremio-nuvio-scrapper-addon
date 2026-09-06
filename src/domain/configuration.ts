@@ -1,5 +1,14 @@
 import type { DynamicRange, Resolution, SourceType, VideoCodec } from './release.js';
 
+export type TorboxPrecacheLimits = {
+  minimumMatchScore?: number;
+  minimumSeeders?: number;
+  maximumTorrentSizeBytes?: number;
+  maximumTotalSizeBytes?: number;
+  allowedResolutions?: readonly Resolution[];
+  preferredLanguagesOnly?: boolean;
+};
+
 export type LanguagePreferences = {
   preferred: readonly string[];
   allowed: readonly string[];
@@ -50,6 +59,7 @@ export type UserConfiguration = {
   torbox: {
     showUncached: boolean;
     precacheCount: number;
+    precacheLimits?: TorboxPrecacheLimits;
   };
   display: {
     mode: 'compact' | 'detailed';

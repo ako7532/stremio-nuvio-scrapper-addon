@@ -49,9 +49,9 @@ for a temporary media link during search.
 ## Playback safety
 
 Search is read-only. Results needing Webshare or TorBox resolution point to a short-lived addon-owned
-play URL. Only a validated GET to that resolver may create or resolve the selected torrent. Future
-precache may also run only from this lifecycle. HEAD is read-only, and idempotency prevents repeated
-Range requests from repeating playback mutations.
+play URL. Only a validated GET to that resolver may create or resolve the selected torrent. Precache
+also runs only from this lifecycle, after the selected provider URL has been resolved. HEAD is
+read-only, and idempotency prevents repeated Range requests from repeating playback mutations.
 
 TorBox play tokens use authenticated encryption and contain only bounded claims that identify an
 expiring server-side playback reference. The reference owns the verified magnet URI and media target;
@@ -62,8 +62,13 @@ and redirects only to an allowlisted TorBox HTTPS host. In-flight and short-live
 are shared by token, making repeated Range requests idempotent. Failed resolution is retryable and first
 checks the account again, preventing another torrent creation after an earlier partial success.
 
-Phase 6 may add the one user-selected torrent during a real GET. It does not implement Phase 7 precache:
-search and HEAD create nothing, and no alternative or next-episode torrents are scheduled.
+The playback reference retains the already filtered and deterministically ranked TorBox candidates and
+a bounded snapshot of the user's precache policy. The background scheduler excludes cached, unknown,
+selected, duplicate, low-score, disallowed-quality, unsafe-size, low-seeder, non-preferred-language,
+and already-accounted torrents. Per-user serialization, an hourly create budget, idempotent reference
+and hash tracking, and provider `Retry-After` backoff prevent mutation bursts. Precache failures are
+contained and never delay or fail the selected redirect. Alternative-release and next-episode
+extensions remain out of scope.
 
 Provider credentials stay in encrypted server-side configuration storage and never appear in manifest, stream, play URLs, frontend state, or logs.
 

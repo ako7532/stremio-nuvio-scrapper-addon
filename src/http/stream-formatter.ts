@@ -22,6 +22,8 @@ export type WebsharePlaybackUrlFactory = (
 export type TorboxPlaybackUrlFactory = (
   result: TorrentProviderResult,
   media: MediaRequest,
+  candidates: readonly RankedResult[],
+  configuration: UserConfiguration,
 ) => string;
 
 export function formatStreams(
@@ -30,6 +32,7 @@ export function formatStreams(
   websharePlaybackUrl?: WebsharePlaybackUrlFactory,
   torboxPlaybackUrl?: TorboxPlaybackUrlFactory,
   media?: MediaRequest,
+  precacheCandidates: readonly RankedResult[] = results,
 ): readonly StremioStream[] {
   return results.flatMap(({ result }) => {
     const playback = playbackFields(
@@ -38,6 +41,7 @@ export function formatStreams(
       websharePlaybackUrl,
       torboxPlaybackUrl,
       media,
+      precacheCandidates,
     );
     if (playback === undefined) return [];
     return [{ ...displayFields(result, configuration.display.mode), ...playback }];
@@ -50,6 +54,7 @@ function playbackFields(
   websharePlaybackUrl: WebsharePlaybackUrlFactory | undefined,
   torboxPlaybackUrl: TorboxPlaybackUrlFactory | undefined,
   media: MediaRequest | undefined,
+  rankedResults: readonly RankedResult[],
 ): Pick<StremioStream, 'url' | 'infoHash' | 'behaviorHints'> | undefined {
   if (result.provider === 'sktorrent') {
     if (configuration.providers.sktorrent.playbackMode === 'direct-torrent') {
@@ -61,7 +66,7 @@ function playbackFields(
     }
     if (torboxPlaybackUrl === undefined || media === undefined) return undefined;
     return {
-      url: validatePlaybackUrl(torboxPlaybackUrl(result, media)),
+      url: validatePlaybackUrl(torboxPlaybackUrl(result, media, rankedResults, configuration)),
       ...(result.filename === undefined ? {} : { behaviorHints: { filename: result.filename } }),
     };
   }

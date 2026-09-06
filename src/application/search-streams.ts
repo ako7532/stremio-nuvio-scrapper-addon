@@ -59,11 +59,9 @@ export function createSearchStreams(dependencies: SearchStreamsDependencies): Se
         dependencies.cacheEnricher === undefined
           ? filtered
           : await dependencies.cacheEnricher(filtered, context);
+      const ranked = rankResults(enriched, dependencies.configuration);
       const limited = limitResults(
-        rankResults(
-          enriched.filter(({ result }) => isAvailableForPlayback(result, dependencies)),
-          dependencies.configuration,
-        ),
+        ranked.filter(({ result }) => isAvailableForPlayback(result, dependencies)),
         dependencies.configuration.limits,
       );
       return formatStreams(
@@ -72,6 +70,7 @@ export function createSearchStreams(dependencies: SearchStreamsDependencies): Se
         dependencies.websharePlaybackUrl,
         dependencies.torboxPlaybackUrl,
         request,
+        ranked,
       );
     },
   };

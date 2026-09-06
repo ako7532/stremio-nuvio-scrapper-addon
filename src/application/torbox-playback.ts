@@ -1,9 +1,12 @@
 import type { MediaRequest } from '../domain/media.js';
+import type { UserConfiguration } from '../domain/configuration.js';
 import type { TorboxPlaybackUrlFactory } from '../http/stream-formatter.js';
+import type { RankedResult, TorrentProviderResult } from '../domain/release.js';
 import type { TorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import type { TorboxTorrent, TorboxTorrentFile } from '../providers/torbox/torbox-types.js';
 import type { PlayTokenClaims, PlayTokenService } from '../security/play-token.js';
 import type { PlaybackReference, PlaybackReferenceStore } from './playback-reference-store.js';
+import type { TorboxPrecacheScheduler } from './torbox-precache.js';
 
 export type TorboxCredential = {
   configId: string;
@@ -50,6 +53,7 @@ export type TorboxPlaybackResolverOptions = {
   allowedPlaybackHosts?: readonly string[];
   resolutionTtlMs?: number;
   clock?: () => number;
+  precache?: TorboxPrecacheScheduler;
 };
 
 export type TorboxPlaybackUrlFactoryOptions = {
@@ -67,11 +71,17 @@ export const createTorboxPlaybackUrlFactory = (
 ): TorboxPlaybackUrlFactory => {
   const baseUrl = validateAddonBaseUrl(options.baseUrl);
   const configId = validateOpaqueId(options.configId, 'configuration ID');
-  return (providerResult, media) => {
+  return (providerResult, media, candidates, configuration) => {
     if (providerResult.magnetUri === undefined) {
       throw new TypeError('TorBox playback requires a verified magnet URI');
     }
-    const reference = options.references.put({ configId, result: providerResult, media });
+    const reference = options.references.put({
+      configId,
+      result: providerResult,
+      media,
+      precacheCandidates: toPrecacheCandidates(candidates),
+      precachePolicy: toPrecachePolicy(configuration),
+    });
     const token = options.tokens.issue(claimsFor(reference));
     return new URL(`play/${encodeURIComponent(token)}`, baseUrl).toString();
   };
@@ -121,7 +131,13 @@ export const createTorboxPlaybackResolver = (
       const existing = resolutions.get(token);
       if (existing !== undefined && existing.expiresAt > clock()) return existing.value;
       resolutions.delete(token);
-      const value = resolvePlayback(validated, options.createClient, allowedHosts, signal);
+      const value = resolvePlayback(
+        validated,
+        options.createClient,
+        allowedHosts,
+        options.precache,
+        signal,
+      );
       resolutions.set(token, { value, expiresAt: clock() + resolutionTtlMs });
       try {
         return await value;
@@ -143,6 +159,7 @@ const resolvePlayback = async (
   playback: ValidatedPlayback,
   createClient: TorboxApiClientFactory,
   allowedHosts: readonly string[],
+  precache: TorboxPrecacheScheduler | undefined,
   signal?: AbortSignal,
 ): Promise<PlaybackResolution> => {
   const client = createClient(playback.credential.apiKey);
@@ -178,8 +195,77 @@ const resolvePlayback = async (
     await client.requestDownloadLink(torrent.id, file.id, signal),
     allowedHosts,
   );
+  if (precache !== undefined) {
+    try {
+      void precache
+        .schedule({
+          reference: playback.reference,
+          client,
+          accountTorrents,
+        })
+        .catch(() => undefined);
+    } catch {
+      // Precache nesmie ovplyvniť prehratie vybraného streamu.
+    }
+  }
   return { url, filename: file.name };
 };
+
+const toPrecacheCandidates = (candidates: readonly RankedResult[]) =>
+  candidates.flatMap(({ result, matchScore }) =>
+    result.provider === 'sktorrent' ? [{ result: cloneTorrentResult(result), matchScore }] : [],
+  );
+
+const cloneTorrentResult = (result: TorrentProviderResult): TorrentProviderResult => ({
+  ...result,
+  ...(result.parsed === undefined
+    ? {}
+    : {
+        parsed: {
+          ...result.parsed,
+          audioCodecs: [...result.parsed.audioCodecs],
+          languages: {
+            ...result.parsed.languages,
+            audio: [...result.parsed.languages.audio],
+            subtitles: [...result.parsed.languages.subtitles],
+          },
+        },
+      }),
+});
+
+const toPrecachePolicy = (
+  configuration: UserConfiguration,
+): PlaybackReference['precachePolicy'] => {
+  const limits = configuration.torbox.precacheLimits;
+  const maximumTorrentSizeBytes = positiveOptional(limits?.maximumTorrentSizeBytes);
+  const maximumTotalSizeBytes = positiveOptional(limits?.maximumTotalSizeBytes);
+  return {
+    count: clampInteger(configuration.torbox.precacheCount, 0, 10),
+    minimumMatchScore: clampNumber(limits?.minimumMatchScore ?? 0, 0),
+    minimumSeeders: clampInteger(
+      limits?.minimumSeeders ?? configuration.filters.minimumSeeders,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    ...(maximumTorrentSizeBytes === undefined ? {} : { maximumTorrentSizeBytes }),
+    ...(maximumTotalSizeBytes === undefined ? {} : { maximumTotalSizeBytes }),
+    allowedResolutions: [
+      ...new Set(limits?.allowedResolutions ?? configuration.filters.resolutions),
+    ],
+    preferredAudioLanguages: [...configuration.languages.audio.preferred],
+    preferredSubtitleLanguages: [...configuration.languages.subtitles.preferred],
+    preferredLanguagesOnly: limits?.preferredLanguagesOnly ?? false,
+  };
+};
+
+const clampInteger = (value: number, minimum: number, maximum: number): number =>
+  Math.min(maximum, Math.max(minimum, Number.isFinite(value) ? Math.floor(value) : minimum));
+
+const clampNumber = (value: number, minimum: number): number =>
+  Math.max(minimum, Number.isFinite(value) ? value : minimum);
+
+const positiveOptional = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined;
 
 export const selectVideoFile = (
   torrent: TorboxTorrent,

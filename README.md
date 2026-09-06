@@ -5,6 +5,7 @@ An early-stage, self-hosted Stremio protocol addon designed to aggregate normali
 The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation,
 fixture-backed Phase 3 SKTorrent provider, Phase 4 Webshare provider layer, and Phase 5 aggregation
 pipeline. Phase 6 adds an injectable TorBox transport, cache enrichment, and secure playback resolver.
+Phase 7 adds bounded, play-triggered TorBox precache orchestration.
 The server exposes a valid manifest and health endpoint; its stream route accepts the
 aggregation use case through dependency injection while production provider/configuration wiring
 remains deferred until secure per-user configuration exists. The manifest will advertise configuration
@@ -67,12 +68,15 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - Read-only HEAD playback validation and idempotent GET redirect resolution
 - Episode-aware video-file selection for single files and season packs
 - TorBox-only playback that never exposes API keys, magnet links, or raw info hashes to clients
+- Ranked alternative precache with cache/account deduplication and configurable safety limits
+- Once-only background precache with per-user operation budgets and provider backoff
 
 Production dependency wiring and persistent per-user configuration remain intentionally unimplemented.
 The TorBox resolver is connected to the HTTP layer through injection; a real deployment must provide a
-server-held credential store, token secret, client factory, cache enricher, and playback URL factory.
-Search and HEAD remain side-effect free. A real GET may add only the selected torrent when it is absent
-from the user's account, while the broader multi-result precache policy remains deferred to Phase 7.
+server-held credential store, token secret, client factory, cache enricher, playback URL factory, and
+precache scheduler. Search and HEAD remain side-effect free. After a real GET has successfully resolved
+the selected stream, the scheduler may add only the configured number of eligible uncached alternatives.
+The selected torrent is excluded, and precache never delays or fails its playback redirect.
 Webshare's authenticated login/link flow is credential-backed and verified at the provider boundary;
 its addon-owned playback route still awaits production configuration wiring.
 An authenticated, sanitized fixture proves that the observed 40-character SKTorrent detail identifier

@@ -133,5 +133,7 @@ These items prevent Phase 0 from being called fully complete:
 - Phase 5 aggregation keeps search handlers side-effect free: providers settle independently, Webshare
   temporary links are not generated during search, and only an injected opaque addon play URL may enter
   a formatted Webshare stream response.
-- TorBox selected-torrent creation belongs only in the playback resolver. Phase 7 precache remains a
-  separate policy and is not run by search or HEAD.
+- TorBox selected-torrent creation belongs only in the playback resolver. Phase 7 precache is a
+  separate best-effort policy started only after selected playback resolves; search and HEAD remain
+  mutation-free. Its candidate count is capped at 10, its default per-user uncached-create budget is
+  60 per hour, and provider `Retry-After` responses stop further work and establish backoff.
