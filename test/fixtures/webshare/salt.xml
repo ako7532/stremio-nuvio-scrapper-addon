@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <status>OK</status>
+  <salt>fixture1</salt>
+  <app_version>30</app_version>
+</response>
+

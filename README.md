@@ -2,10 +2,10 @@
 
 An early-stage, self-hosted Stremio protocol addon designed to aggregate normalized stream results from SKTorrent and Webshare, with optional TorBox resolution.
 
-The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation, and
-fixture-backed Phase 3 SKTorrent provider. The server exposes a valid manifest, health endpoint, and an
-empty stream response until provider aggregation is connected in Phase 5. The manifest will advertise
-configuration support only once the configure route exists.
+The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation,
+fixture-backed Phase 3 SKTorrent provider, and Phase 4 Webshare provider layer. The server exposes a
+valid manifest, health endpoint, and an empty stream response until provider aggregation is connected
+in Phase 5. The manifest will advertise configuration support only once the configure route exists.
 
 ## Requirements
 
@@ -50,8 +50,13 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - Bounded read-only SKTorrent HTML transport and allowlisted listing/detail URL construction
 - Authenticated SKTorrent torrent retrieval with mandatory info-hash verification
 - Normalized SKTorrent provider results with bounded detail concurrency
+- Official-API Webshare search, file metadata, and availability lookups with validated XML fixtures
+- Isolated Webshare salt/login credential service and late playback-link resolver
+- Normalized Webshare file results with bounded metadata concurrency
 
-Provider playback and TorBox mutations remain intentionally unimplemented until credential-backed behavior is verified.
+Provider aggregation, addon-owned playback routes, and TorBox mutations remain intentionally
+unimplemented. Webshare's authenticated login/link flow is credential-backed and verified at the
+provider boundary; connecting it to playback belongs to Phase 5.
 An authenticated, sanitized fixture proves that the observed 40-character SKTorrent detail identifier
 matches the BitTorrent v1 info hash. Torrent metadata parsing still verifies that equality before it may
 emit an `infoHash` or magnet URI; page identifiers are never trusted without the downloaded metainfo.

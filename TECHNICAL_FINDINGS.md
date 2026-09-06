@@ -45,6 +45,18 @@ Webshare has an official form-encoded, XML-response API:
 
 The direct link will only be requested by the playback resolver. All XML responses must be schema-validated because API failures are generally represented in response XML rather than by a useful non-2xx status.
 
+A credential-free live probe of the open Sintel movie on 2026-09-06 confirmed the current search,
+`file_info`, and `file_exists` response shapes. The sanitized fixtures retain only public media metadata
+and replace preview hosts with `example.invalid`. Inspection of Webshare's current first-party client
+also confirmed that its session token is sent as the `wst` field in the form-encoded POST body, not in
+the request URL.
+
+A credential-backed live test then confirmed salt/login authentication and `file_link` with
+`download_type=video_stream`. The temporary HTTPS media URL answered HEAD with HTTP 200,
+`Accept-Ranges: bytes`, and a content length. A `bytes=0-0` request answered HTTP 206 with
+`Content-Range`; neither request redirected. The committed authentication/link fixtures replace the
+real account salt, session token, and media URL with inert values.
+
 Source: [official Webshare.cz API reference](https://webshare.cz/apidoc/)
 
 ### TorBox supports batched cache checks and late link resolution
@@ -94,7 +106,9 @@ No stable public API was found. Treat the HTML as an unstable provider contract,
 These items prevent Phase 0 from being called fully complete:
 
 1. **TorBox response fixtures:** with a test API key, capture sanitized responses for user validation, cached/uncached checks, create-torrent, account list, and request-download-link. Confirm current 429 and `Retry-After` behavior.
-2. **Webshare response fixtures:** with a test account, validate the current token transport and whether `video_stream` links support HEAD, Range, and redirect-based playback.
+2. **Webshare playback longevity:** establish the observed lifetime of a generated `video_stream` URL
+   and capture provider rate-limit/`Retry-After` behavior without intentionally stressing the service.
+   Authentication, link resolution, HEAD, Range, and current no-redirect behavior are verified.
 3. **Client matrix:** deploy the resolver over HTTPS and exercise 302/307 redirects, HEAD, and repeated Range requests on Stremio Desktop, Android, Web, and Nuvio. This is a manual/device test and cannot be established from protocol docs alone.
 4. **Series identifiers:** confirm all incoming Stremio/Nuvio series ID shapes to parse season/episode without accepting false positives.
 
@@ -102,6 +116,7 @@ These items prevent Phase 0 from being called fully complete:
 
 - Phase 1 can proceed now: strict project skeleton, protocol routes, domain contracts, and tests do not depend on the open items.
 - Phase 2 can proceed with pure metadata/query/parser/matcher code.
-- SKTorrent direct-torrent normalization may proceed with mandatory downloaded-metainfo verification;
-  Webshare playback and TorBox mutation work still require their own sanitized credential-backed fixtures.
+- SKTorrent direct-torrent normalization may proceed with mandatory downloaded-metainfo verification.
+  Webshare's provider layer and late resolver contract may proceed, but connecting authenticated
+  playback and all TorBox mutation work still require sanitized credential-backed fixtures.
 - Search handlers must remain side-effect free. TorBox create and precache operations belong only in the playback resolver.

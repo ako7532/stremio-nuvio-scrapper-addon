@@ -53,3 +53,20 @@ The authenticated SKTorrent source owns its short-lived login-cookie session and
 parsers or normalized results. The provider caps listing candidates before resolving details, processes
 details with bounded concurrency, downloads torrent metadata through an ID-checked provider URL, and
 normalizes a result only after the torrent parser verifies its info hash.
+
+## Webshare API boundary
+
+The Webshare adapter uses only the official form-encoded XML API. A bounded transport owns endpoint
+selection, timeouts, cancellation, redirect rejection, response limits, and XML content checks. Strict
+parsers validate success/error envelopes and required search, file-info, and availability fields before
+provider normalization.
+
+Public search never authenticates and never creates playback links. A dedicated credential service owns
+the username, password, MD5-crypt/SHA-1 login derivation, and lazy session token. The source supplies the
+token only in the `wst` POST field when a selected file is resolved through `file_link`; credentials and
+temporary links never enter normalized search results. The source caps candidates and bounds concurrent
+metadata work. Phase 5 will connect those results and an addon-owned play route to the HTTP layer.
+
+Credential-backed validation confirms that resolved Webshare HTTPS links support HEAD and byte-range
+GET requests. The provider returned the media response directly during the probe; the addon-owned
+resolver may still use a redirect so the temporary provider URL remains outside Stremio responses.

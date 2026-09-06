@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<response>
+  <status>OK</status>
+  <total>18</total>
+  <file>
+    <ident>5m56ZO4cb6</ident>
+    <name>Sintel - Příběh draka (2010) 1080p CZ - (ShortFilm) AppleTV.mp4</name>
+    <type>mp4</type>
+    <img>https://images.example.invalid/sintel.jpg</img>
+    <stripe>https://images.example.invalid/sintel-stripe.jpg</stripe>
+    <stripe_count>10</stripe_count>
+    <size>2015084270</size>
+    <queued>0</queued>
+    <positive_votes>3</positive_votes>
+    <negative_votes>0</negative_votes>
+    <password>0</password>
+  </file>
+  <app_version>30</app_version>
+</response>
+
