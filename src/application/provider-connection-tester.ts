@@ -1,4 +1,5 @@
 import type { CredentialProvider, ProviderCredentials } from '../domain/configuration.js';
+import { createTmdbClient } from '../metadata/tmdb-client.js';
 import { createSktorrentSource } from '../providers/sktorrent/sktorrent-source.js';
 import { createTorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import { createWebshareApiClient } from '../providers/webshare/webshare-api-client.js';
@@ -19,6 +20,13 @@ export const testProviderConnection: ProviderConnectionTester = async (
   signal,
 ) => {
   try {
+    if (provider === 'tmdb' && 'accessToken' in credential) {
+      await createTmdbClient({
+        accessToken: credential.accessToken,
+        timeoutMs,
+      }).validateAuthentication(signal);
+      return;
+    }
     if (provider === 'torbox' && 'apiKey' in credential) {
       await createTorboxApiClient({ apiKey: credential.apiKey, timeoutMs }).validateAuthentication(
         signal,

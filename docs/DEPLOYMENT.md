@@ -1,21 +1,21 @@
 # Deployment
 
-The addon targets a single-instance, self-hosted deployment. Production stream assembly is a separate
-integration phase and is not yet wired in `src/main.ts`; the current image starts the protocol,
-configuration, persistence, and health boundaries but configured searches return no streams.
+The addon targets a single-instance, self-hosted deployment. Production startup assembles per-user
+metadata, providers, caches, and playback dependencies for configured stream routes.
 
 ## Required environment
 
-| Variable                | Required   | Default                 | Purpose                                                                          |
-| ----------------------- | ---------- | ----------------------- | -------------------------------------------------------------------------------- |
-| `CONFIG_ENCRYPTION_KEY` | Yes        | none                    | Stable base64-encoded 32-byte key used to encrypt per-user provider credentials. |
-| `ADDON_BASE_URL`        | Production | `http://127.0.0.1:7000` | Public HTTPS base URL placed in generated manifest links.                        |
-| `CONFIG_DATABASE_PATH`  | No         | `addon.sqlite`          | SQLite file; the container defaults to `/data/addon.sqlite`.                     |
-| `HOST`                  | No         | `0.0.0.0`               | Listen address.                                                                  |
-| `PORT`                  | No         | `7000`                  | Listen port.                                                                     |
-| `LOG_LEVEL`             | No         | `info`                  | Pino level from `fatal` through `trace`, or `silent`.                            |
-| `TRUST_PROXY`           | No         | `false`                 | Trust forwarded client addresses only behind a controlled reverse proxy.         |
-| `SHUTDOWN_TIMEOUT_MS`   | No         | `10000`                 | Forced-shutdown deadline, from 1 to 60 seconds.                                  |
+| Variable                  | Required          | Default                 | Purpose                                                                            |
+| ------------------------- | ----------------- | ----------------------- | ---------------------------------------------------------------------------------- |
+| `CONFIG_ENCRYPTION_KEY`   | Yes               | none                    | Stable base64-encoded 32-byte key used to encrypt per-user provider credentials.   |
+| `ADDON_BASE_URL`          | Production        | `http://127.0.0.1:7000` | Public HTTPS base URL placed in generated manifest links.                          |
+| `CONFIG_DATABASE_PATH`    | No                | `addon.sqlite`          | SQLite file; the container defaults to `/data/addon.sqlite`.                       |
+| `HOST`                    | No                | `0.0.0.0`               | Listen address.                                                                    |
+| `PORT`                    | No                | `7000`                  | Listen port.                                                                       |
+| `LOG_LEVEL`               | No                | `info`                  | Pino level from `fatal` through `trace`, or `silent`.                              |
+| `TRUST_PROXY`             | No                | `false`                 | Trust forwarded client addresses only behind a controlled reverse proxy.           |
+| `SHUTDOWN_TIMEOUT_MS`     | No                | `10000`                 | Forced-shutdown deadline, from 1 to 60 seconds.                                    |
+| `WEBSHARE_PLAYBACK_HOSTS` | Webshare playback | empty                   | Comma-separated exact HTTPS media hosts verified with the user's Webshare account. |
 
 Generate the encryption key locally and store it in a secrets manager:
 

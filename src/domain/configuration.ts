@@ -74,6 +74,7 @@ export type UserConfiguration = {
 };
 
 export type ProviderCredentials = {
+  tmdb?: { accessToken: string };
   sktorrent?: { username: string; password: string };
   webshare?: { username: string; password: string };
   torbox?: { apiKey: string };

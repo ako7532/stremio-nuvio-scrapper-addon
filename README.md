@@ -1,6 +1,6 @@
 # Stremio / Nuvio CZ-SK scraper addon
 
-An early-stage, self-hosted Stremio protocol addon designed to aggregate normalized stream results from SKTorrent and Webshare, with optional TorBox resolution.
+A self-hosted Stremio protocol addon that aggregates normalized stream results from SKTorrent and Webshare, with optional TorBox resolution and per-user TMDB metadata.
 
 The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation,
 fixture-backed Phase 3 SKTorrent provider, Phase 4 Webshare provider layer, and Phase 5 aggregation
@@ -8,9 +8,8 @@ pipeline. Phase 6 adds an injectable TorBox transport, cache enrichment, and sec
 Phase 7 adds bounded, play-triggered TorBox precache orchestration.
 Phase 8 adds the responsive configure page, encrypted per-user SQLite configuration storage,
 masked credential status, credential replacement/removal, provider connection tests, opaque configured
-manifest URLs, and revocation. The server stream route accepts the aggregation use case through
-dependency injection; concrete metadata-source and per-user playback wiring remain separate from the
-configuration slice.
+manifest URLs, and revocation. Production startup now assembles the user's TMDB metadata resolver,
+enabled providers, caches, TorBox integration, and addon-owned playback routes per configuration.
 
 Phase 9 hardening is implemented. The HTTP boundary applies a nonce-based content security policy to
 the configure page, disables caching for configuration responses, adds bounded in-memory request
@@ -38,6 +37,7 @@ base64-encoded 32-byte key; changing or losing it makes saved credentials unread
 CONFIG_ENCRYPTION_KEY=<base64-encoded 32-byte key>
 CONFIG_DATABASE_PATH=addon.sqlite
 ADDON_BASE_URL=http://127.0.0.1:7000
+WEBSHARE_PLAYBACK_HOSTS=<comma-separated exact hosts verified for your account>
 ```
 
 Use HTTPS for `ADDON_BASE_URL` outside local development. Both `.env` and SQLite database files are
@@ -72,6 +72,7 @@ Operational references are in [deployment](./docs/DEPLOYMENT.md),
 ## Implemented domain pipeline
 
 - Ordered metadata resolver/source contracts with cancellation support
+- Bounded official-origin TMDB client with per-user Bearer authentication and localized titles
 - CZ/SK-aware title normalization and deduplicated movie/episode query generation
 - Provider-independent quality, codec, HDR, audio, and language parsing
 - Separate scored movie and episode matchers
@@ -106,14 +107,13 @@ Operational references are in [deployment](./docs/DEPLOYMENT.md),
 - Safe provider/search/cache observations without queries, media IDs, URLs, or credentials
 - Graceful shutdown, explicit reverse-proxy trust, Docker deployment, and CI quality gates
 
-Production metadata and per-user search/playback dependency wiring remain intentionally unimplemented.
-The TorBox resolver is connected to the HTTP layer through injection; a real deployment must provide a
-server-held credential store, token secret, client factory, cache enricher, playback URL factory, and
-precache scheduler. Search and HEAD remain side-effect free. After a real GET has successfully resolved
+Production metadata and per-user search/playback dependency wiring is assembled outside `src/main.ts`
+and reused by configuration ID plus update timestamp. Search and HEAD remain side-effect free. After a real GET has successfully resolved
 the selected stream, the scheduler may add only the configured number of eligible uncached alternatives.
 The selected torrent is excluded, and precache never delays or fails its playback redirect.
-Webshare's authenticated login/link flow is credential-backed and verified at the provider boundary;
-its addon-owned playback route still awaits production configuration wiring.
+Webshare's authenticated login/link flow is credential-backed and runs only on a real playback GET.
+Webshare streams are emitted only when `WEBSHARE_PLAYBACK_HOSTS` contains the exact credential-verified
+media hosts; an empty allowlist deliberately keeps them hidden.
 An authenticated, sanitized fixture proves that the observed 40-character SKTorrent detail identifier
 matches the BitTorrent v1 info hash. Torrent metadata parsing still verifies that equality before it may
 emit an `infoHash` or magnet URI; page identifiers are never trusted without the downloaded metainfo.

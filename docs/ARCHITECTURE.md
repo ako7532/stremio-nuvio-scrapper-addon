@@ -34,9 +34,9 @@ limits are applied before the total limit.
 The total limit also has a server-side cap of 100 results.
 
 The HTTP stream route parses standard IMDb movie IDs and `id:season:episode` series IDs, then delegates
-to an injected `SearchStreams` implementation. This keeps provider credentials and future per-user
-configuration outside the transport layer. Without that production wiring, the route preserves the
-valid empty stream response used by the skeleton.
+to a bounded production runtime keyed by configuration ID and `updatedAt`. The runtime owns the user's
+TMDB resolver, enabled provider adapters, caches, budgets, and playback URL factories. Updates and
+revocation discard the searchable runtime while playback still reloads current credentials server-side.
 
 Stream formatting is the last pipeline stage. Direct SKTorrent mode emits a verified `infoHash`;
 TorBox-only results require successful cache enrichment and an addon-owned play-URL factory. Unknown
@@ -53,10 +53,10 @@ play URL. Only a validated GET to that resolver may create or resolve the select
 also runs only from this lifecycle, after the selected provider URL has been resolved. HEAD is
 read-only, and idempotency prevents repeated Range requests from repeating playback mutations.
 
-TorBox play tokens use authenticated encryption and contain only bounded claims that identify an
+Play tokens use authenticated encryption and contain only bounded provider-specific claims that identify an
 expiring server-side playback reference. The reference owns the verified magnet URI and media target;
 the token and reference must agree on configuration, provider result, info hash, and episode coordinates.
-The resolver checks the server-side credential reference, reuses a matching torrent already in the
+The TorBox resolver checks the server-side credential reference, reuses a matching torrent already in the
 user's account, selects an allowlisted video file, requests the temporary link with a Bearer credential,
 and redirects only to an allowlisted TorBox HTTPS host. In-flight and short-lived successful resolutions
 are shared by token, making repeated Range requests idempotent. Failed resolution is retryable and first
@@ -69,6 +69,11 @@ and already-accounted torrents. Per-user serialization, an hourly create budget,
 and hash tracking, and provider `Retry-After` backoff prevent mutation bursts. Precache failures are
 contained and never delay or fail the selected redirect. Alternative-release and next-episode
 extensions remain out of scope.
+
+Webshare uses a separate expiring server-side file reference under the same provider-discriminated token
+service. HEAD validates only the reference and current configuration. GET alone authenticates, requests
+`file_link`, and accepts a redirect target only when its HTTPS hostname exactly matches the configured
+allowlist. Successful resolutions are shared briefly for idempotency.
 
 Provider credentials stay in encrypted server-side configuration storage and never appear in manifest, stream, play URLs, frontend state, or logs.
 
@@ -152,8 +157,16 @@ Public search never authenticates and never creates playback links. A dedicated 
 the username, password, MD5-crypt/SHA-1 login derivation, and lazy session token. The source supplies the
 token only in the `wst` POST field when a selected file is resolved through `file_link`; credentials and
 temporary links never enter normalized search results. The source caps candidates and bounds concurrent
-metadata work. Phase 5 will connect those results and an addon-owned play route to the HTTP layer.
+metadata work. The production runtime connects eligible results to the addon-owned play route.
 
 Credential-backed validation confirms that resolved Webshare HTTPS links support HEAD and byte-range
 GET requests. The provider returned the media response directly during the probe; the addon-owned
-resolver may still use a redirect so the temporary provider URL remains outside Stremio responses.
+resolver uses a redirect so the temporary provider URL remains outside Stremio search responses.
+
+## TMDB metadata boundary
+
+TMDB requests use each user's encrypted API Read Access Token as a Bearer header. The client permits
+only the official HTTPS origin and explicit authentication, external-ID lookup, detail, and alternative
+title paths; redirects are rejected and time, response size, JSON shape, and `Retry-After` are bounded.
+IMDb IDs resolve to original/English, Slovak, Czech, and selected alternative titles. Missing or invalid
+TMDB credentials fail safely without a shared fallback.

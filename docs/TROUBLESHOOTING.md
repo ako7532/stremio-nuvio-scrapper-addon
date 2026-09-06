@@ -20,10 +20,10 @@ of adding secrets or complete environment dumps to logs.
 
 ## No streams are returned
 
-The current production entrypoint does not yet assemble metadata and per-user provider dependencies, so
-an otherwise valid configured route returns an empty stream list. After that separate integration is
-implemented, check provider toggles, hard filters, language mode, playback mode, and credentials. One
-provider failure should not discard successful results from another provider.
+Confirm the user has a valid TMDB token and credentials for every enabled provider, then check provider
+toggles, hard filters, language mode, and playback mode. Webshare also requires a deployment-level exact
+`WEBSHARE_PLAYBACK_HOSTS` allowlist; without it, Webshare results are deliberately hidden. One provider
+failure should not discard successful results from another provider.
 
 ## Rate limits identify the wrong client
 

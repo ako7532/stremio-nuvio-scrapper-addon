@@ -1,0 +1,247 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { createProductionIntegration } from '../../src/application/production-integration.js';
+import type { ConfigurationService } from '../../src/application/configuration-service.js';
+import type { StoredConfiguration } from '../../src/application/configuration-store.js';
+import { defaultConfiguration } from '../../src/domain/configuration-defaults.js';
+import type { TmdbClient } from '../../src/metadata/tmdb-client.js';
+import { buildServer } from '../../src/http/server.js';
+import type { StreamProvider } from '../../src/providers/provider.js';
+import { parseRelease } from '../../src/release/release-parser.js';
+
+describe('production integration', () => {
+  it('returns fixture-backed movie and episode streams and reuses the runtime caches', async () => {
+    const stored = configuration();
+    const service = configurationService(stored);
+    const findByImdbId = vi
+      .fn<TmdbClient['findByImdbId']>()
+      .mockImplementation((request) =>
+        Promise.resolve(
+          request.type === 'movie'
+            ? { id: 11, originalTitle: 'Sintel', title: 'Sintel', year: 2010 }
+            : { id: 22, originalTitle: 'Fixture Show', title: 'Fixture Show', year: 2020 },
+        ),
+      );
+    const tmdb: TmdbClient = {
+      validateAuthentication: vi.fn(),
+      findByImdbId,
+      getLocalizedTitle: vi
+        .fn()
+        .mockImplementation((type) =>
+          Promise.resolve(type === 'movie' ? 'Sintel' : 'Fixture Show'),
+        ),
+      getAlternativeTitles: vi.fn().mockResolvedValue([]),
+    };
+    const providerSearch = vi.fn<StreamProvider['search']>().mockImplementation((query) => {
+      const filename =
+        query.type === 'movie'
+          ? 'Sintel.2010.1080p.WEB-DL.CZ.HEVC.mkv'
+          : 'Fixture.Show.S01E02.1080p.WEB-DL.CZ.HEVC.mkv';
+      return Promise.resolve([
+        {
+          provider: 'sktorrent' as const,
+          source: 'torrent' as const,
+          id: query.type === 'movie' ? 'movie-result' : 'episode-result',
+          title: filename,
+          releaseName: filename,
+          filename,
+          mediaType: query.type,
+          providerUrl: 'https://sktorrent.eu/torrent/details.php?id=fixture',
+          infoHash: 'a'.repeat(40),
+          magnetUri: `magnet:?xt=urn:btih:${'a'.repeat(40)}`,
+          cacheStatus: 'unknown' as const,
+          parsed: parseRelease(filename),
+          seeders: 10,
+        },
+      ]);
+    });
+    const provider: StreamProvider = {
+      name: 'sktorrent',
+      capabilities: {
+        search: true,
+        source: 'torrent',
+        requiresAuthentication: true,
+        supportsDirectStreaming: false,
+        supportsCacheLookup: false,
+      },
+      search: providerSearch,
+    };
+    const integration = createProductionIntegration({
+      configurationService: service,
+      baseUrl: 'https://addon.example/',
+      playbackSecret: new Uint8Array(32).fill(7),
+      factories: {
+        tmdbClient: () => tmdb,
+        sktorrentProvider: () => provider,
+      },
+    });
+    const firstRuntime = integration.searchStreamsForConfiguration(stored);
+    const secondRuntime = integration.searchStreamsForConfiguration(stored);
+    expect(secondRuntime).toBe(firstRuntime);
+
+    const context = { signal: new AbortController().signal, correlationId: 'fixture-request' };
+    const movie = await firstRuntime.search({ type: 'movie', id: 'tt0000011' }, context);
+    const episode = await firstRuntime.search(
+      { type: 'series', id: 'tt0000022', season: 1, episode: 2 },
+      context,
+    );
+    await firstRuntime.search({ type: 'movie', id: 'tt0000011' }, context);
+
+    expect(movie[0]).toMatchObject({ infoHash: 'a'.repeat(40) });
+    expect(episode[0]).toMatchObject({
+      infoHash: 'a'.repeat(40),
+      behaviorHints: { filename: 'Fixture.Show.S01E02.1080p.WEB-DL.CZ.HEVC.mkv' },
+    });
+    expect(findByImdbId).toHaveBeenCalledTimes(2);
+    expect(providerSearch.mock.calls.length).toBeGreaterThan(0);
+
+    const server = buildServer({
+      configurationService: service,
+      searchStreamsForConfiguration: (value) => integration.searchStreamsForConfiguration(value),
+      torboxPlaybackResolver: integration.playbackResolver,
+    });
+    try {
+      const response = await server.inject({
+        method: 'GET',
+        url: `/${stored.id}/stream/movie/tt0000011.json`,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        streams: [{ infoHash: 'a'.repeat(40) }],
+      });
+      expect(response.body).not.toContain('sanitized-tmdb-token');
+      expect(response.body).not.toContain('fixture-password');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('requires a per-user TMDB token and rebuilds after updates or invalidation', async () => {
+    const stored = configuration();
+    const service = configurationService(stored);
+    const integration = createProductionIntegration({
+      configurationService: service,
+      baseUrl: 'https://addon.example/',
+      playbackSecret: new Uint8Array(32).fill(9),
+      factories: {
+        tmdbClient: () => ({
+          validateAuthentication: vi.fn(),
+          findByImdbId: vi.fn().mockResolvedValue(undefined),
+          getLocalizedTitle: vi.fn(),
+          getAlternativeTitles: vi.fn(),
+        }),
+      },
+    });
+    const original = integration.searchStreamsForConfiguration(stored);
+    const updated = integration.searchStreamsForConfiguration({
+      ...stored,
+      updatedAt: '2026-09-06T22:00:00.000Z',
+    });
+    expect(updated).not.toBe(original);
+    integration.invalidate(stored.id);
+    expect(integration.searchStreamsForConfiguration(stored)).not.toBe(updated);
+
+    const missingTmdb = integration.searchStreamsForConfiguration({
+      ...stored,
+      id: 'configuration-without-tmdb-1234',
+      credentials: { sktorrent: { username: 'fixture-user', password: 'fixture-password' } },
+    });
+    await expect(
+      missingTmdb.search(
+        { type: 'movie', id: 'tt0000011' },
+        { signal: new AbortController().signal, correlationId: 'missing-tmdb' },
+      ),
+    ).rejects.toMatchObject({ kind: 'InvalidConfiguration' });
+  });
+
+  it('assembles SKTorrent and Webshare only when independently enabled', () => {
+    const base = configuration();
+    const service = configurationService(base);
+    const search = vi.fn<StreamProvider['search']>().mockResolvedValue([]);
+    const sktorrentProvider = vi.fn().mockReturnValue(provider('sktorrent', search));
+    const webshareProvider = vi.fn().mockReturnValue(provider('webshare', search));
+    const integration = createProductionIntegration({
+      configurationService: service,
+      baseUrl: 'https://addon.example/',
+      playbackSecret: new Uint8Array(32).fill(5),
+      websharePlaybackHosts: ['media.example.test'],
+      factories: {
+        tmdbClient: () => ({
+          validateAuthentication: vi.fn(),
+          findByImdbId: vi.fn(),
+          getLocalizedTitle: vi.fn(),
+          getAlternativeTitles: vi.fn(),
+        }),
+        sktorrentProvider,
+        webshareProvider,
+      },
+    });
+
+    integration.searchStreamsForConfiguration(base);
+    expect(sktorrentProvider).toHaveBeenCalledOnce();
+    expect(webshareProvider).not.toHaveBeenCalled();
+
+    integration.searchStreamsForConfiguration({
+      ...base,
+      updatedAt: '2026-09-06T23:00:00.000Z',
+      configuration: {
+        ...base.configuration,
+        providers: {
+          sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
+          webshare: { enabled: true },
+        },
+      },
+      credentials: {
+        ...base.credentials,
+        webshare: { username: 'fixture-user', password: 'fixture-password' },
+      },
+    });
+    expect(sktorrentProvider).toHaveBeenCalledOnce();
+    expect(webshareProvider).toHaveBeenCalledOnce();
+  });
+});
+
+function configuration(): StoredConfiguration {
+  return {
+    id: 'configuration-fixture-1234567890',
+    configuration: {
+      ...defaultConfiguration(),
+      providers: {
+        sktorrent: { enabled: true, playbackMode: 'direct-torrent' },
+        webshare: { enabled: false },
+      },
+    },
+    credentials: {
+      tmdb: { accessToken: 'sanitized-tmdb-token' },
+      sktorrent: { username: 'fixture-user', password: 'fixture-password' },
+    },
+    createdAt: '2026-09-06T20:00:00.000Z',
+    updatedAt: '2026-09-06T20:00:00.000Z',
+  };
+}
+
+function configurationService(stored: StoredConfiguration): ConfigurationService {
+  return {
+    create: vi.fn(),
+    get: vi.fn(),
+    update: vi.fn(),
+    revoke: vi.fn(),
+    getStored: vi
+      .fn()
+      .mockImplementation((id) => Promise.resolve(id === stored.id ? stored : undefined)),
+  };
+}
+
+function provider(name: StreamProvider['name'], search: StreamProvider['search']): StreamProvider {
+  return {
+    name,
+    capabilities: {
+      search: true,
+      source: name === 'sktorrent' ? 'torrent' : 'file-hosting',
+      requiresAuthentication: true,
+      supportsDirectStreaming: name === 'webshare',
+      supportsCacheLookup: false,
+    },
+    search,
+  };
+}

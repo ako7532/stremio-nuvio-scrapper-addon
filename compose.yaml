@@ -16,6 +16,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TRUST_PROXY: ${TRUST_PROXY:-false}
       SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
+      WEBSHARE_PLAYBACK_HOSTS: ${WEBSHARE_PLAYBACK_HOSTS:-}
     volumes:
       - addon-data:/data
     tmpfs:

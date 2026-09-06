@@ -1,0 +1,8 @@
+{
+  "id": 11,
+  "titles": [
+    { "iso_3166_1": "SK", "title": "Dobrodružstvo vo hviezdach" },
+    { "iso_3166_1": "CZ", "title": "Dobrodružství ve hvězdách" },
+    { "iso_3166_1": "JP", "title": "Sanitized Japanese title" }
+  ]
+}

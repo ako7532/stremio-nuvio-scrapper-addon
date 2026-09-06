@@ -4,21 +4,43 @@ import { z } from 'zod';
 
 import { mediaTypes } from '../domain/media.js';
 
-const claimsSchema = z.object({
+const commonClaims = {
   configId: z.string().min(16).max(200),
   referenceId: z.string().min(16).max(200),
-  provider: z.literal('sktorrent'),
   providerResultId: z.string().min(1).max(200),
-  infoHash: z.string().regex(/^[a-f\d]{40}$/u),
   mediaType: z.enum(mediaTypes),
   mediaId: z.string().min(1).max(200),
   season: z.number().int().min(0).optional(),
   episode: z.number().int().positive().optional(),
-  expiresAt: z.number().int().positive(),
-});
+};
+const claimsSchema = z.discriminatedUnion('provider', [
+  z.object({
+    ...commonClaims,
+    provider: z.literal('sktorrent'),
+    infoHash: z.string().regex(/^[a-f\d]{40}$/u),
+    expiresAt: z.number().int().positive(),
+  }),
+  z.object({
+    ...commonClaims,
+    provider: z.literal('webshare'),
+    expiresAt: z.number().int().positive(),
+  }),
+]);
+const newClaimsSchema = z.discriminatedUnion('provider', [
+  z.object({
+    ...commonClaims,
+    provider: z.literal('sktorrent'),
+    infoHash: z.string().regex(/^[a-f\d]{40}$/u),
+  }),
+  z.object({
+    ...commonClaims,
+    provider: z.literal('webshare'),
+  }),
+]);
 
 export type PlayTokenClaims = z.infer<typeof claimsSchema>;
-export type NewPlayTokenClaims = Omit<PlayTokenClaims, 'expiresAt'>;
+type WithoutExpiry<Value> = Value extends unknown ? Omit<Value, 'expiresAt'> : never;
+export type NewPlayTokenClaims = WithoutExpiry<PlayTokenClaims>;
 
 export class PlayTokenError extends Error {
   override readonly name = 'PlayTokenError';
@@ -54,7 +76,7 @@ export const createPlayTokenService = (options: PlayTokenServiceOptions): PlayTo
 
   return {
     issue(claims) {
-      const parsedClaims = claimsSchema.omit({ expiresAt: true }).parse(claims);
+      const parsedClaims = newClaimsSchema.parse(claims);
       const payload = Buffer.from(
         JSON.stringify({ ...parsedClaims, expiresAt: clock() + ttlMs }),
         'utf8',

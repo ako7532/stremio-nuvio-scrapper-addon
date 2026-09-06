@@ -28,6 +28,7 @@ describe('configuration HTTP API', () => {
     expect(response.headers['content-type']).toContain('text/html');
     expect(response.body).toContain('name="viewport"');
     expect(response.body).toContain('Test TorBox');
+    expect(response.body).toContain('Test TMDB');
     expect(response.body).not.toContain('server-held-fixture-key');
     const nonce = /<script nonce="([^"]+)">/u.exec(response.body)?.[1] ?? '';
     const script = /<script nonce="[^"]+">([\s\S]+)<\/script>/u.exec(response.body)?.[1];
@@ -48,22 +49,27 @@ describe('configuration HTTP API', () => {
     });
     servers.push(server);
     const secret = 'server-held-fixture-key';
+    const tmdbSecret = 'server-held-tmdb-token';
 
     const created = await server.inject({
       method: 'POST',
       url: '/api/configurations',
       payload: {
         configuration: defaultConfiguration(),
-        credentials: { torbox: { apiKey: secret } },
+        credentials: { tmdb: { accessToken: tmdbSecret }, torbox: { apiKey: secret } },
       },
     });
 
     expect(created.statusCode).toBe(200);
     expect(created.body).not.toContain(secret);
+    expect(created.body).not.toContain(tmdbSecret);
     const publicValue = created.json<{
       id: string;
       manifestUrl: string;
-      credentials: { torbox: { configured: boolean; masked: string } };
+      credentials: {
+        tmdb: { configured: boolean; masked: string };
+        torbox: { configured: boolean; masked: string };
+      };
     }>();
     expect(publicValue.id).toMatch(/^[A-Za-z\d_-]{32}$/u);
     expect(publicValue.manifestUrl).toBe(
@@ -74,6 +80,11 @@ describe('configuration HTTP API', () => {
       masked: '••••••••-key',
     });
     expect(store.values.get(publicValue.id)?.credentials.torbox?.apiKey).toBe(secret);
+    expect(store.values.get(publicValue.id)?.credentials.tmdb?.accessToken).toBe(tmdbSecret);
+    expect(publicValue.credentials.tmdb).toEqual({
+      configured: true,
+      masked: '••••••••oken',
+    });
 
     const manifest = await server.inject({
       method: 'GET',
@@ -81,6 +92,7 @@ describe('configuration HTTP API', () => {
     });
     expect(manifest.statusCode).toBe(200);
     expect(manifest.body).not.toContain(secret);
+    expect(manifest.body).not.toContain(tmdbSecret);
 
     const updated = await server.inject({
       method: 'PUT',

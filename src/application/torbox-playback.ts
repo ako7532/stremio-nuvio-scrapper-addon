@@ -45,6 +45,8 @@ export type TorboxPlaybackResolver = {
   resolve(token: string, signal?: AbortSignal): Promise<PlaybackResolution>;
 };
 
+type TorboxPlayTokenClaims = Extract<PlayTokenClaims, { provider: 'sktorrent' }>;
+
 export type TorboxPlaybackResolverOptions = {
   tokens: PlayTokenService;
   references: PlaybackReferenceStore;
@@ -102,6 +104,9 @@ export const createTorboxPlaybackResolver = (
 
   const inspect = async (token: string): Promise<ValidatedPlayback> => {
     const claims = options.tokens.verify(token);
+    if (claims.provider !== 'sktorrent') {
+      throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
+    }
     const reference = options.references.get(claims.referenceId);
     if (reference === undefined || !referenceMatchesClaims(reference, claims)) {
       throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
@@ -150,7 +155,7 @@ export const createTorboxPlaybackResolver = (
 };
 
 type ValidatedPlayback = {
-  claims: PlayTokenClaims;
+  claims: TorboxPlayTokenClaims;
   reference: PlaybackReference;
   credential: TorboxCredential;
 };
@@ -299,7 +304,7 @@ const matchesEpisode = (name: string, season: number, episode: number): boolean 
   return patterns.some((pattern) => pattern.test(name));
 };
 
-const claimsFor = (reference: PlaybackReference): Omit<PlayTokenClaims, 'expiresAt'> => ({
+const claimsFor = (reference: PlaybackReference): Omit<TorboxPlayTokenClaims, 'expiresAt'> => ({
   configId: reference.configId,
   referenceId: reference.id,
   provider: 'sktorrent',
@@ -312,7 +317,10 @@ const claimsFor = (reference: PlaybackReference): Omit<PlayTokenClaims, 'expires
     : {}),
 });
 
-const referenceMatchesClaims = (reference: PlaybackReference, claims: PlayTokenClaims): boolean =>
+const referenceMatchesClaims = (
+  reference: PlaybackReference,
+  claims: TorboxPlayTokenClaims,
+): boolean =>
   reference.configId === claims.configId &&
   reference.result.id === claims.providerResultId &&
   reference.result.infoHash.toLowerCase() === claims.infoHash &&

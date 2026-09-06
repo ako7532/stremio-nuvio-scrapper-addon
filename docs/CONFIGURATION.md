@@ -5,11 +5,14 @@ encrypted in server-side SQLite storage and the browser receives only configured
 
 ## Providers
 
+- **TMDB** is required for configured searches. Every user supplies their own API Read Access Token;
+  there is no shared credential or public metadata fallback.
 - **SKTorrent** requires the individual user's username and password. Direct-torrent mode returns only
   a metainfo-verified hash. TorBox-only mode requires that user's TorBox key and never exposes the key,
   magnet URI, or raw hash in an HTTP stream URL.
 - **Webshare** requires the individual user's username and password. Search is read-only; authentication
-  and temporary link generation happen only through server-held provider services.
+  and temporary link generation happen only on playback GET through server-held provider services.
+  Results remain hidden until the deployment has an exact credential-verified media-host allowlist.
 - **TorBox** is optional and uses the individual user's API key for cache checks, selected playback, and
   explicitly configured alternative precache.
 

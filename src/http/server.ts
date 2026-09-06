@@ -40,9 +40,15 @@ const playParamsSchema = z.object({
     .regex(/^[A-Za-z\d._-]+$/u),
 });
 const configParamsSchema = z.object({ configId: z.string() });
-const providerParamsSchema = z.object({ provider: z.enum(['sktorrent', 'webshare', 'torbox']) });
+const providerParamsSchema = z.object({
+  provider: z.enum(['tmdb', 'sktorrent', 'webshare', 'torbox']),
+});
 const providerTestSchema = z.strictObject({
   configurationId: z.string().optional(),
+  tmdb: z
+    .strictObject({ accessToken: z.string().trim().min(1).max(2_048) })
+    .nullable()
+    .optional(),
   sktorrent: z
     .strictObject({
       username: z.string().trim().min(1).max(320),
@@ -77,6 +83,7 @@ export type ServerOptions = {
   torboxPlaybackResolver?: TorboxPlaybackResolver;
   configurationService?: ConfigurationService;
   searchStreamsForConfiguration?: (configuration: StoredConfiguration) => SearchStreams | undefined;
+  invalidateConfigurationRuntime?: (configId: string) => void;
   providerConnectionTester?: ProviderConnectionTester;
   publicBaseUrl?: string;
   rateLimiters?: Partial<ServerRateLimiters>;
@@ -205,6 +212,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (value === undefined) {
         return await reply.code(404).send({ error: 'Configuration not found' });
       }
+      options.invalidateConfigurationRuntime?.(configId);
       return value;
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -222,7 +230,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     if (configId === undefined || options.configurationService === undefined) {
       return reply.code(404).send({ error: 'Configuration not found' });
     }
-    return (await options.configurationService.revoke(configId))
+    const revoked = await options.configurationService.revoke(configId);
+    if (revoked) options.invalidateConfigurationRuntime?.(configId);
+    return revoked
       ? { revoked: true as const }
       : reply.code(404).send({ error: 'Configuration not found' });
   });

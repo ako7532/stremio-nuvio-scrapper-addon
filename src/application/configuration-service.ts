@@ -96,7 +96,11 @@ const sktorrentCredentialSchema = z.strictObject({
 });
 const webshareCredentialSchema = sktorrentCredentialSchema;
 const torboxCredentialSchema = z.strictObject({ apiKey: z.string().trim().min(1).max(1_024) });
+const tmdbCredentialSchema = z.strictObject({
+  accessToken: z.string().trim().min(1).max(2_048),
+});
 const credentialChangesSchema = z.strictObject({
+  tmdb: tmdbCredentialSchema.nullable().optional(),
   sktorrent: sktorrentCredentialSchema.nullable().optional(),
   webshare: webshareCredentialSchema.nullable().optional(),
   torbox: torboxCredentialSchema.nullable().optional(),
@@ -170,6 +174,8 @@ function applyCredentialChanges(
   changes: z.infer<typeof credentialChangesSchema>,
 ): ProviderCredentials {
   const next = { ...current };
+  if (changes.tmdb === null) delete next.tmdb;
+  else if (changes.tmdb !== undefined) next.tmdb = changes.tmdb;
   if (changes.sktorrent === null) delete next.sktorrent;
   else if (changes.sktorrent !== undefined) next.sktorrent = changes.sktorrent;
   if (changes.webshare === null) delete next.webshare;
@@ -184,13 +190,18 @@ function toPublic(stored: StoredConfiguration, baseUrl: string): PublicConfigura
     const credential = stored.credentials[provider];
     if (credential === undefined) return { configured: false };
     const visible =
-      'apiKey' in credential ? credential.apiKey.slice(-4) : credential.username.slice(-4);
+      'apiKey' in credential
+        ? credential.apiKey.slice(-4)
+        : 'accessToken' in credential
+          ? credential.accessToken.slice(-4)
+          : credential.username.slice(-4);
     return { configured: true, masked: `••••••••${visible}` };
   };
   return {
     id: stored.id,
     configuration: stored.configuration,
     credentials: {
+      tmdb: status('tmdb'),
       sktorrent: status('sktorrent'),
       webshare: status('webshare'),
       torbox: status('torbox'),
