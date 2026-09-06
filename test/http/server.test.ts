@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildServer } from '../../src/http/server.js';
 import type { SearchStreams } from '../../src/application/search-streams.js';
+import type { TorboxPlaybackResolver } from '../../src/application/torbox-playback.js';
 
 const servers: ReturnType<typeof buildServer>[] = [];
 
@@ -87,5 +88,24 @@ describe('Stremio HTTP contract', () => {
     const response = await server.inject({ method: 'GET', url: '/stream/series/tt1234567.json' });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it('keeps HEAD playback read-only and redirects real GET playback', async () => {
+    const inspect = vi.fn<TorboxPlaybackResolver['inspect']>().mockResolvedValue(undefined);
+    const resolve = vi.fn<TorboxPlaybackResolver['resolve']>().mockResolvedValue({
+      url: 'https://cdn.torbox.app/fixture-video',
+      filename: 'Fixture.Show.S01E02.mkv',
+    });
+    const server = buildServer({ torboxPlaybackResolver: { inspect, resolve } });
+    servers.push(server);
+
+    const head = await server.inject({ method: 'HEAD', url: '/play/v1.fixture.token.signature' });
+    const get = await server.inject({ method: 'GET', url: '/play/v1.fixture.token.signature' });
+
+    expect(head.statusCode).toBe(204);
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(resolve).toHaveBeenCalledOnce();
+    expect(get.statusCode).toBe(302);
+    expect(get.headers.location).toBe('https://cdn.torbox.app/fixture-video');
   });
 });

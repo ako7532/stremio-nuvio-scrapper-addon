@@ -4,7 +4,8 @@ An early-stage, self-hosted Stremio protocol addon designed to aggregate normali
 
 The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation,
 fixture-backed Phase 3 SKTorrent provider, Phase 4 Webshare provider layer, and Phase 5 aggregation
-pipeline. The server exposes a valid manifest and health endpoint; its stream route accepts the
+pipeline. Phase 6 adds an injectable TorBox transport, cache enrichment, and secure playback resolver.
+The server exposes a valid manifest and health endpoint; its stream route accepts the
 aggregation use case through dependency injection while production provider/configuration wiring
 remains deferred until secure per-user configuration exists. The manifest will advertise configuration
 support only once the configure route exists.
@@ -60,11 +61,20 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - Deterministic configurable ranking and post-ranking per-resolution/total limits
 - Compact and detailed Stremio formatting for direct torrents and opaque Webshare play URLs
 - Strict parsing of standard Stremio movie and series stream identifiers
+- Typed, bounded TorBox authentication, batched cache, torrent, and download-link transport
+- Short-lived TorBox cache enrichment with explicit cached, uncached, and unknown states
+- Authenticated-encrypted opaque play tokens backed by expiring server-side release references
+- Read-only HEAD playback validation and idempotent GET redirect resolution
+- Episode-aware video-file selection for single files and season packs
+- TorBox-only playback that never exposes API keys, magnet links, or raw info hashes to clients
 
-Production dependency wiring, addon-owned playback routes, and TorBox mutations remain intentionally
-unimplemented. Webshare's authenticated login/link flow is credential-backed and verified at the
-provider boundary; Phase 5 accepts an opaque play-URL factory without resolving temporary links during
-search.
+Production dependency wiring and persistent per-user configuration remain intentionally unimplemented.
+The TorBox resolver is connected to the HTTP layer through injection; a real deployment must provide a
+server-held credential store, token secret, client factory, cache enricher, and playback URL factory.
+Search and HEAD remain side-effect free. A real GET may add only the selected torrent when it is absent
+from the user's account, while the broader multi-result precache policy remains deferred to Phase 7.
+Webshare's authenticated login/link flow is credential-backed and verified at the provider boundary;
+its addon-owned playback route still awaits production configuration wiring.
 An authenticated, sanitized fixture proves that the observed 40-character SKTorrent detail identifier
 matches the BitTorrent v1 info hash. Torrent metadata parsing still verifies that equality before it may
 emit an `infoHash` or magnet URI; page identifiers are never trusted without the downloaded metainfo.

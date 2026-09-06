@@ -64,6 +64,7 @@ Source: [official Webshare.cz API reference](https://webshare.cz/apidoc/)
 The current official SDK documentation exposes:
 
 - `GET /v1/api/torrents/checkcached`, accepting multiple hashes with an approximate maximum of 100 per request and optional cached file lists.
+- `POST /v1/api/torrents/checkcached`, accepting a JSON hash array for larger batches without URL-length pressure.
 - `POST /v1/api/torrents/createtorrent`, accepting a magnet or torrent file.
 - `GET /v1/api/torrents/mylist`, needed to find account torrent/file identifiers and avoid duplicate additions.
 - `GET /v1/api/torrents/requestdl`, returning a temporary download link or redirecting to it.
@@ -71,6 +72,13 @@ The current official SDK documentation exposes:
 All authenticated TorBox calls use a server-held API key. Although TorBox documents a token-bearing permalink, this addon must not expose it because the project security model forbids credentials in playback URLs. The addon resolver will call `requestdl` server-side and redirect to the returned CDN URL.
 
 `checkcached` is suitable for one batched enrichment stage after deduplication. A failed or ambiguous lookup maps to `unknown`, never `uncached`.
+
+The implemented transport caps cache batches at 100 even when using POST, bounds time and response
+size, rejects redirects, and performs no automatic retry. HTTP 429 preserves `Retry-After` for the
+application layer. Published TorBox limits checked on 2026-09-06 are 300 requests per minute per
+endpoint/API key, with an additional 60-per-hour limit for uncached `createtorrent` operations.
+Although TorBox documents a token-bearing `requestdl` permalink, the addon deliberately calls the
+endpoint server-side with a Bearer credential so the API key never enters a Stremio URL.
 
 Sources:
 
@@ -105,7 +113,10 @@ No stable public API was found. Treat the HTML as an unstable provider contract,
 
 These items prevent Phase 0 from being called fully complete:
 
-1. **TorBox response fixtures:** with a test API key, capture sanitized responses for user validation, cached/uncached checks, create-torrent, account list, and request-download-link. Confirm current 429 and `Retry-After` behavior.
+1. **TorBox credential-backed validation:** synthetic sanitized fixtures now cover authentication,
+   cached/uncached checks, create-torrent, account list, request-download-link, malformed data, and
+   `Retry-After`. A real test API key is still needed to confirm those current response shapes and the
+   server-side Bearer form of `requestdl` without exposing the credential.
 2. **Webshare playback longevity:** establish the observed lifetime of a generated `video_stream` URL
    and capture provider rate-limit/`Retry-After` behavior without intentionally stressing the service.
    Authentication, link resolution, HEAD, Range, and current no-redirect behavior are verified.
@@ -122,4 +133,5 @@ These items prevent Phase 0 from being called fully complete:
 - Phase 5 aggregation keeps search handlers side-effect free: providers settle independently, Webshare
   temporary links are not generated during search, and only an injected opaque addon play URL may enter
   a formatted Webshare stream response.
-- TorBox create and precache operations belong only in the playback resolver.
+- TorBox selected-torrent creation belongs only in the playback resolver. Phase 7 precache remains a
+  separate policy and is not run by search or HEAD.

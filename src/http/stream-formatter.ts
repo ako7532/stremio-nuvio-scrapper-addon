@@ -1,5 +1,11 @@
 import type { UserConfiguration } from '../domain/configuration.js';
-import type { FileProviderResult, ProviderResult, RankedResult } from '../domain/release.js';
+import type { MediaRequest } from '../domain/media.js';
+import type {
+  FileProviderResult,
+  ProviderResult,
+  RankedResult,
+  TorrentProviderResult,
+} from '../domain/release.js';
 
 export type StremioStream = {
   name: string;
@@ -9,15 +15,30 @@ export type StremioStream = {
   behaviorHints?: { filename?: string };
 };
 
-export type WebsharePlaybackUrlFactory = (result: FileProviderResult) => string;
+export type WebsharePlaybackUrlFactory = (
+  result: FileProviderResult,
+  media?: MediaRequest,
+) => string;
+export type TorboxPlaybackUrlFactory = (
+  result: TorrentProviderResult,
+  media: MediaRequest,
+) => string;
 
 export function formatStreams(
   results: readonly RankedResult[],
   configuration: UserConfiguration,
   websharePlaybackUrl?: WebsharePlaybackUrlFactory,
+  torboxPlaybackUrl?: TorboxPlaybackUrlFactory,
+  media?: MediaRequest,
 ): readonly StremioStream[] {
   return results.flatMap(({ result }) => {
-    const playback = playbackFields(result, configuration, websharePlaybackUrl);
+    const playback = playbackFields(
+      result,
+      configuration,
+      websharePlaybackUrl,
+      torboxPlaybackUrl,
+      media,
+    );
     if (playback === undefined) return [];
     return [{ ...displayFields(result, configuration.display.mode), ...playback }];
   });
@@ -27,18 +48,26 @@ function playbackFields(
   result: ProviderResult,
   configuration: UserConfiguration,
   websharePlaybackUrl: WebsharePlaybackUrlFactory | undefined,
+  torboxPlaybackUrl: TorboxPlaybackUrlFactory | undefined,
+  media: MediaRequest | undefined,
 ): Pick<StremioStream, 'url' | 'infoHash' | 'behaviorHints'> | undefined {
   if (result.provider === 'sktorrent') {
-    if (configuration.providers.sktorrent.playbackMode !== 'direct-torrent') return undefined;
-    if (result.mediaType === 'series' && result.filename === undefined) return undefined;
+    if (configuration.providers.sktorrent.playbackMode === 'direct-torrent') {
+      if (result.mediaType === 'series' && result.filename === undefined) return undefined;
+      return {
+        infoHash: result.infoHash,
+        ...(result.filename === undefined ? {} : { behaviorHints: { filename: result.filename } }),
+      };
+    }
+    if (torboxPlaybackUrl === undefined || media === undefined) return undefined;
     return {
-      infoHash: result.infoHash,
+      url: validatePlaybackUrl(torboxPlaybackUrl(result, media)),
       ...(result.filename === undefined ? {} : { behaviorHints: { filename: result.filename } }),
     };
   }
   if (websharePlaybackUrl === undefined) return undefined;
   return {
-    url: validatePlaybackUrl(websharePlaybackUrl(result)),
+    url: validatePlaybackUrl(websharePlaybackUrl(result, media)),
     ...(result.filename === undefined ? {} : { behaviorHints: { filename: result.filename } }),
   };
 }

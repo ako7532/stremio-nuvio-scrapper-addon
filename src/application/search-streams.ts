@@ -8,6 +8,7 @@ import type { ProviderResult, RankedResult } from '../domain/release.js';
 import {
   formatStreams,
   type StremioStream,
+  type TorboxPlaybackUrlFactory,
   type WebsharePlaybackUrlFactory,
 } from '../http/stream-formatter.js';
 import { matchEpisode } from '../matching/episode-matcher.js';
@@ -31,6 +32,7 @@ export type SearchStreamsDependencies = {
   configuration: UserConfiguration;
   cacheEnricher?: CacheEnricher;
   websharePlaybackUrl?: WebsharePlaybackUrlFactory;
+  torboxPlaybackUrl?: TorboxPlaybackUrlFactory;
 };
 
 export function createSearchStreams(dependencies: SearchStreamsDependencies): SearchStreams {
@@ -52,28 +54,52 @@ export function createSearchStreams(dependencies: SearchStreamsDependencies): Se
       const filtered = filterResults(
         deduplicateResults(matched),
         dependencies.configuration,
-      ).filter(({ result }) => isPlaybackSupported(result, dependencies));
+      ).filter(({ result }) => isPlaybackCandidate(result, dependencies));
       const enriched =
         dependencies.cacheEnricher === undefined
           ? filtered
           : await dependencies.cacheEnricher(filtered, context);
       const limited = limitResults(
-        rankResults(enriched, dependencies.configuration),
+        rankResults(
+          enriched.filter(({ result }) => isAvailableForPlayback(result, dependencies)),
+          dependencies.configuration,
+        ),
         dependencies.configuration.limits,
       );
-      return formatStreams(limited, dependencies.configuration, dependencies.websharePlaybackUrl);
+      return formatStreams(
+        limited,
+        dependencies.configuration,
+        dependencies.websharePlaybackUrl,
+        dependencies.torboxPlaybackUrl,
+        request,
+      );
     },
   };
 }
 
-function isPlaybackSupported(
+function isPlaybackCandidate(
   result: ProviderResult,
   dependencies: SearchStreamsDependencies,
 ): boolean {
   if (result.provider === 'webshare') return dependencies.websharePlaybackUrl !== undefined;
-  if (dependencies.configuration.providers.sktorrent.playbackMode !== 'direct-torrent')
-    return false;
+  if (dependencies.configuration.providers.sktorrent.playbackMode === 'torbox-only') {
+    return dependencies.torboxPlaybackUrl !== undefined && result.magnetUri !== undefined;
+  }
   return result.mediaType !== 'series' || result.filename !== undefined;
+}
+
+function isAvailableForPlayback(
+  result: ProviderResult,
+  dependencies: SearchStreamsDependencies,
+): boolean {
+  if (
+    result.provider !== 'sktorrent' ||
+    dependencies.configuration.providers.sktorrent.playbackMode === 'direct-torrent'
+  ) {
+    return true;
+  }
+  if (result.cacheStatus === 'cached') return true;
+  return result.cacheStatus === 'uncached' && dependencies.configuration.torbox.showUncached;
 }
 
 async function searchProviders(

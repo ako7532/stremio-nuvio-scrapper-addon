@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "detail": "Torrent cache status retrieved successfully.",
+  "data": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "Cached fixture",
+      "size": 2147483648
+    }
+  }
+}

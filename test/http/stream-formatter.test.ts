@@ -40,6 +40,24 @@ describe('Stremio stream formatter', () => {
     expect(formatStreams([ranked], configuration('torbox-only'))).toEqual([]);
   });
 
+  it('formats a TorBox-only result with an addon-owned URL and no raw info hash', () => {
+    const streams = formatStreams(
+      [ranked],
+      configuration('torbox-only'),
+      undefined,
+      () => 'https://addon.example/play/opaque-token',
+      { type: 'movie', id: 'tt0807840' },
+    );
+
+    expect(streams).toEqual([
+      expect.objectContaining({
+        url: 'https://addon.example/play/opaque-token',
+        behaviorHints: { filename: result.filename },
+      }),
+    ]);
+    expect(streams[0]).not.toHaveProperty('infoHash');
+  });
+
   it('does not expose an unresolved multi-file series torrent', () => {
     const seriesTorrent: TorrentProviderResult = { ...result, mediaType: 'series' };
     delete seriesTorrent.filename;

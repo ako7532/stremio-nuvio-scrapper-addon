@@ -1,0 +1,5 @@
+{
+  "success": false,
+  "error": "BAD_TOKEN",
+  "detail": "Invalid API token."
+}

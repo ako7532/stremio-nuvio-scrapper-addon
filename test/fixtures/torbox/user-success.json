@@ -1,0 +1,5 @@
+{
+  "success": true,
+  "detail": "User data retrieved successfully.",
+  "data": { "id": 123, "plan": 1 }
+}

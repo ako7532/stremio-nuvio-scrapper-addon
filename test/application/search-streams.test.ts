@@ -2,10 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createSearchStreams } from '../../src/application/search-streams.js';
 import type { UserConfiguration } from '../../src/domain/configuration.js';
-import type { FileProviderResult, RankedResult } from '../../src/domain/release.js';
+import type {
+  FileProviderResult,
+  RankedResult,
+  TorrentProviderResult,
+} from '../../src/domain/release.js';
 import type { MetadataResolver } from '../../src/metadata/metadata-resolver.js';
 import type { StreamProvider } from '../../src/providers/provider.js';
 import { parseRelease } from '../../src/release/release-parser.js';
+import type { TorboxPlaybackUrlFactory } from '../../src/http/stream-formatter.js';
 
 const configuration: UserConfiguration = {
   providers: {
@@ -94,6 +99,78 @@ describe('SearchStreams', () => {
       }),
     ]);
   });
+
+  it('keeps TorBox search side-effect free and hides unknown or disabled uncached results', async () => {
+    const metadataResolver: MetadataResolver = {
+      resolve: vi.fn().mockResolvedValue({
+        type: 'movie',
+        id: 'tt0807840',
+        originalTitle: 'Sintel',
+        alternativeTitles: [],
+        year: 2010,
+      }),
+    };
+    const cached = torrentResult('a');
+    const uncached = torrentResult('b');
+    const unknown = torrentResult('c');
+    const provider: StreamProvider = {
+      name: 'sktorrent',
+      capabilities: {
+        search: true,
+        source: 'torrent',
+        requiresAuthentication: true,
+        supportsDirectStreaming: false,
+        supportsCacheLookup: false,
+      },
+      search: vi.fn().mockResolvedValue([cached, uncached, unknown]),
+    };
+    const cacheEnricher = vi.fn((results: readonly RankedResult[]) =>
+      Promise.resolve(
+        results.map((ranked) => ({
+          ...ranked,
+          result: {
+            ...ranked.result,
+            cacheStatus:
+              ranked.result.id === 'a'
+                ? ('cached' as const)
+                : ranked.result.id === 'b'
+                  ? ('uncached' as const)
+                  : ('unknown' as const),
+          },
+        })),
+      ),
+    );
+    const torboxPlaybackUrl = vi
+      .fn<TorboxPlaybackUrlFactory>()
+      .mockReturnValue('https://addon.example/play/opaque-token');
+    const torboxConfiguration: UserConfiguration = {
+      ...configuration,
+      providers: {
+        ...configuration.providers,
+        sktorrent: { enabled: true, playbackMode: 'torbox-only' },
+        webshare: { enabled: false },
+      },
+      torbox: { showUncached: false, precacheCount: 0 },
+    };
+    const searchStreams = createSearchStreams({
+      metadataResolver,
+      providers: [provider],
+      configuration: torboxConfiguration,
+      cacheEnricher,
+      torboxPlaybackUrl,
+    });
+
+    const streams = await searchStreams.search(
+      { type: 'movie', id: 'tt0807840' },
+      { signal: new AbortController().signal, correlationId: 'request-torbox' },
+    );
+
+    expect(streams).toHaveLength(1);
+    expect(streams[0]).toMatchObject({ url: 'https://addon.example/play/opaque-token' });
+    expect(streams[0]).not.toHaveProperty('infoHash');
+    expect(torboxPlaybackUrl).toHaveBeenCalledOnce();
+    expect(torboxPlaybackUrl.mock.calls[0]?.[1]).toEqual({ type: 'movie', id: 'tt0807840' });
+  });
 });
 
 function webshareResult(): FileProviderResult {
@@ -112,5 +189,27 @@ function webshareResult(): FileProviderResult {
     parsed: parseRelease(filename),
     available: true,
     streamable: true,
+  };
+}
+
+function torrentResult(prefix: string): TorrentProviderResult {
+  const filename = `Sintel.2010.1080p.WEB-DL.CZ.HEVC.${prefix}.mkv`;
+  const infoHash = prefix.repeat(40);
+  return {
+    provider: 'sktorrent',
+    source: 'torrent',
+    id: prefix,
+    title: filename,
+    releaseName: filename,
+    filename,
+    mediaType: 'movie',
+    year: 2010,
+    sizeBytes: 2_000_000_000,
+    seeders: 10,
+    providerUrl: `https://sktorrent.eu/torrent/details.php?id=${infoHash}`,
+    parsed: parseRelease(filename),
+    infoHash,
+    magnetUri: `magnet:?xt=urn:btih:${infoHash}`,
+    cacheStatus: 'unknown',
   };
 }

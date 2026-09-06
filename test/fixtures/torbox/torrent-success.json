@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "detail": "Torrent list retrieved successfully.",
+  "data": {
+    "id": 42,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "Fixture.Show.S01",
+    "download_state": "cached",
+    "files": [
+      { "id": 0, "name": "Fixture.Show.S01E01.1080p.mkv", "size": 1000 },
+      { "id": 1, "name": "Fixture.Show.S01E02.1080p.mkv", "size": 2000 },
+      { "id": 2, "name": "sample.txt", "size": 100 }
+    ]
+  }
+}

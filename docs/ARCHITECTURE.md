@@ -39,14 +39,31 @@ configuration outside the transport layer. Without that production wiring, the r
 valid empty stream response used by the skeleton.
 
 Stream formatting is the last pipeline stage. Direct SKTorrent mode emits a verified `infoHash`;
-TorBox-only results and multi-file series results without a selected filename stay hidden until Phase 6
-supplies its resolver. Webshare results enter ranking and limits only when an addon-owned play-URL
+TorBox-only results require successful cache enrichment and an addon-owned play-URL factory. Unknown
+cache state is never treated as uncached; uncached results appear only when explicitly configured.
+Multi-file series torrents are accepted only through TorBox, where playback selects the requested
+episode from the provider-confirmed file list. Webshare results enter ranking and limits only when an addon-owned play-URL
 factory is available. Formatting accepts only an HTTPS URL from that factory and never asks Webshare
 for a temporary media link during search.
 
 ## Playback safety
 
-Search is read-only. Results needing Webshare or TorBox resolution point to a short-lived addon-owned play URL. Only a validated GET to that resolver may create/resolve a selected torrent and schedule precache. HEAD is read-only, and idempotency prevents repeated Range requests from scheduling the same work again.
+Search is read-only. Results needing Webshare or TorBox resolution point to a short-lived addon-owned
+play URL. Only a validated GET to that resolver may create or resolve the selected torrent. Future
+precache may also run only from this lifecycle. HEAD is read-only, and idempotency prevents repeated
+Range requests from repeating playback mutations.
+
+TorBox play tokens use authenticated encryption and contain only bounded claims that identify an
+expiring server-side playback reference. The reference owns the verified magnet URI and media target;
+the token and reference must agree on configuration, provider result, info hash, and episode coordinates.
+The resolver checks the server-side credential reference, reuses a matching torrent already in the
+user's account, selects an allowlisted video file, requests the temporary link with a Bearer credential,
+and redirects only to an allowlisted TorBox HTTPS host. In-flight and short-lived successful resolutions
+are shared by token, making repeated Range requests idempotent. Failed resolution is retryable and first
+checks the account again, preventing another torrent creation after an earlier partial success.
+
+Phase 6 may add the one user-selected torrent during a real GET. It does not implement Phase 7 precache:
+search and HEAD create nothing, and no alternative or next-episode torrents are scheduled.
 
 Provider credentials stay in encrypted server-side configuration storage and never appear in manifest, stream, play URLs, frontend state, or logs.
 
