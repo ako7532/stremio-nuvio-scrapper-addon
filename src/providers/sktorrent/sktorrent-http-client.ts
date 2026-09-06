@@ -1,6 +1,7 @@
 import { normalizeSktorrentReadOnlyPageUrl } from './sktorrent-urls.js';
 
-export type SktorrentHttpErrorKind = 'cancelled' | 'timeout' | 'unavailable' | 'invalid-response';
+export type SktorrentHttpErrorKind =
+  'authentication-failed' | 'cancelled' | 'timeout' | 'unavailable' | 'invalid-response';
 
 export class SktorrentHttpError extends Error {
   override readonly name = 'SktorrentHttpError';

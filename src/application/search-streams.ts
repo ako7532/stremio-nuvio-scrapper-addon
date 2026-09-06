@@ -16,6 +16,18 @@ import { matchMovie } from '../matching/movie-matcher.js';
 import type { MetadataResolver } from '../metadata/metadata-resolver.js';
 import { generateSearchQueries } from '../metadata/search-query-generator.js';
 import type { StreamProvider } from '../providers/provider.js';
+import type { CacheObserver } from '../infrastructure/cache-observer.js';
+import { classifyApplicationError } from './application-error.js';
+import {
+  applyProviderExecutionPolicy,
+  type ProviderExecutionPolicyOptions,
+} from './provider-execution-policy.js';
+import {
+  createCachedMetadataResolver,
+  createCachedStreamProvider,
+  type SearchCacheOptions,
+} from './search-cache.js';
+import { observeSearch, type SearchObserver } from './search-observability.js';
 
 export type SearchStreamsContext = { signal: AbortSignal; correlationId: string };
 export type SearchStreams = {
@@ -33,18 +45,53 @@ export type SearchStreamsDependencies = {
   cacheEnricher?: CacheEnricher;
   websharePlaybackUrl?: WebsharePlaybackUrlFactory;
   torboxPlaybackUrl?: TorboxPlaybackUrlFactory;
+  observer?: SearchObserver;
+  clock?: () => number;
+  caching?:
+    | false
+    | {
+        metadata?: SearchCacheOptions;
+        provider?: SearchCacheOptions;
+      };
+  providerExecutionPolicy?: false | ProviderExecutionPolicyOptions;
 };
 
 export function createSearchStreams(dependencies: SearchStreamsDependencies): SearchStreams {
+  const clock = dependencies.clock ?? Date.now;
+  const cacheObserver: CacheObserver = (event) => {
+    observeSearch(dependencies.observer, { type: 'cache', ...event });
+  };
+  const metadataResolver =
+    dependencies.caching === false
+      ? dependencies.metadataResolver
+      : createCachedMetadataResolver(dependencies.metadataResolver, {
+          ...dependencies.caching?.metadata,
+          observer: cacheObserver,
+        });
+  const providers = dependencies.providers.map((provider) => {
+    const protectedProvider =
+      dependencies.providerExecutionPolicy === false
+        ? provider
+        : applyProviderExecutionPolicy(provider, dependencies.providerExecutionPolicy);
+    return dependencies.caching === false
+      ? protectedProvider
+      : createCachedStreamProvider(protectedProvider, {
+          ...dependencies.caching?.provider,
+          observer: cacheObserver,
+        });
+  });
   return {
     async search(request, context) {
-      const metadata = await dependencies.metadataResolver.resolve(request, context);
+      const startedAt = clock();
+      const metadata = await metadataResolver.resolve(request, context);
       const queries = generateSearchQueries(metadata, { includeSeasonPacks: true });
       const providerResults = await searchProviders(
-        dependencies.providers,
+        providers,
         queries,
         dependencies.configuration,
         context,
+        dependencies.observer,
+        clock,
       );
       const matched = providerResults.flatMap((result) => {
         const decision =
@@ -64,7 +111,7 @@ export function createSearchStreams(dependencies: SearchStreamsDependencies): Se
         ranked.filter(({ result }) => isAvailableForPlayback(result, dependencies)),
         dependencies.configuration.limits,
       );
-      return formatStreams(
+      const streams = formatStreams(
         limited,
         dependencies.configuration,
         dependencies.websharePlaybackUrl,
@@ -72,6 +119,16 @@ export function createSearchStreams(dependencies: SearchStreamsDependencies): Se
         request,
         ranked,
       );
+      observeSearch(dependencies.observer, {
+        type: 'search-complete',
+        correlationId: context.correlationId,
+        durationMs: Math.max(0, clock() - startedAt),
+        rawResultCount: providerResults.length,
+        matchedResultCount: matched.length,
+        filteredResultCount: filtered.length,
+        returnedResultCount: streams.length,
+      });
+      return streams;
     },
   };
 }
@@ -106,18 +163,37 @@ async function searchProviders(
   queries: readonly SearchQuery[],
   configuration: UserConfiguration,
   context: SearchStreamsContext,
+  observer: SearchObserver | undefined,
+  clock: () => number,
 ): Promise<readonly ProviderResult[]> {
   const enabled = providers.filter((provider) => configuration.providers[provider.name].enabled);
   const providerSettlements = await Promise.allSettled(
     enabled.map(async (provider) => {
+      const startedAt = clock();
       const results: ProviderResult[] = [];
+      let failureCount = 0;
       for (const query of queries) {
         try {
           results.push(...(await provider.search(query, context)));
-        } catch {
+        } catch (error) {
           context.signal.throwIfAborted();
+          failureCount += 1;
+          observeSearch(observer, {
+            type: 'provider-error',
+            provider: provider.name,
+            category: classifyApplicationError(error, 'ProviderUnavailable').kind,
+            correlationId: context.correlationId,
+          });
         }
       }
+      observeSearch(observer, {
+        type: 'provider-complete',
+        provider: provider.name,
+        durationMs: Math.max(0, clock() - startedAt),
+        rawResultCount: results.length,
+        failureCount,
+        correlationId: context.correlationId,
+      });
       return results;
     }),
   );

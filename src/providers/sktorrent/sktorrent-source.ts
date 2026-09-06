@@ -120,7 +120,7 @@ const authenticate = async (
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!login.ok) {
-    throw new SktorrentHttpError('invalid-response', 'SKTorrent authentication failed', {
+    throw new SktorrentHttpError('authentication-failed', 'SKTorrent authentication failed', {
       statusCode: login.status,
     });
   }
@@ -132,7 +132,7 @@ const authenticate = async (
     .join('; ');
   if (cookie.length === 0 || /[\r\n]/u.test(cookie)) {
     throw new SktorrentHttpError(
-      'invalid-response',
+      'authentication-failed',
       'SKTorrent authentication returned no session',
     );
   }
@@ -146,7 +146,7 @@ const authenticate = async (
   });
   const body = new TextDecoder().decode(await readBoundedBody(check, maximumHtmlBytes));
   if (!check.ok || body.includes('Vitaj Guest') || !body.includes('logout.php')) {
-    throw new SktorrentHttpError('invalid-response', 'SKTorrent authentication failed');
+    throw new SktorrentHttpError('authentication-failed', 'SKTorrent authentication failed');
   }
   return cookie;
 };

@@ -84,6 +84,29 @@ tokens do not enter logs. The configure page receives a per-response CSP nonce a
 responses are marked `no-store`. Cross-origin access is enabled only for the Stremio protocol and
 playback routes, not for the configuration UI or its API.
 
+Provider transports and parsers are mapped to a provider-independent application error taxonomy before
+they cross the HTTP boundary. The public handler returns stable status codes and generic messages for
+timeouts, authentication failures, rate limits, unavailable providers, missing media, and playback
+failures. Provider `Retry-After` survives the mapping, but provider messages and nested causes do not.
+Unexpected exceptions receive a generic 500 response and only a safe category is logged.
+
+Metadata uses a bounded long-TTL cache, provider search uses a bounded short-TTL cache whose key covers
+the complete normalized query, and SKTorrent detail pages use a bounded medium-TTL cache keyed by
+provider identity and URL. Only successful values are retained and callers receive clones. TorBox cache
+status has its own short TTL and bounded entry count; temporary playback links are never placed in these
+caches. The default `SearchStreams` assembly enables metadata and provider-result caching.
+
+Each stream provider is wrapped once per `SearchStreams` instance with bounded concurrency and queueing,
+a fixed-window operation budget, cancellation-aware waits, and at most one retry. Only transport timeout
+and unavailable failures are retryable; authentication, rate limiting, invalid requests, parser failures,
+and malformed responses are not. Provider and search observations contain only correlation ID, provider,
+duration, counts, cache hits/misses, and application error category. Observers are failure-isolated.
+
+Production startup keeps reverse-proxy trust disabled unless explicitly configured, closes Fastify and
+SQLite once on SIGINT or SIGTERM, and enforces a shutdown deadline. The container runs unprivileged with
+a read-only root filesystem under Compose, persistent SQLite storage, dropped capabilities, and a health
+check. CI repeats formatting, lint, typecheck, tests, build, and production dependency audit.
+
 ## Configuration and persistence
 
 The configure page talks to a narrow application service rather than SQLite directly. Its repository

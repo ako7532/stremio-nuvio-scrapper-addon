@@ -12,10 +12,12 @@ manifest URLs, and revocation. The server stream route accepts the aggregation u
 dependency injection; concrete metadata-source and per-user playback wiring remain separate from the
 configuration slice.
 
-Phase 9 hardening is in progress. The HTTP boundary applies a nonce-based content security policy to
+Phase 9 hardening is implemented. The HTTP boundary applies a nonce-based content security policy to
 the configure page, disables caching for configuration responses, adds bounded in-memory request
 limits, and emits structured route-template logs without configuration IDs, play tokens, credentials,
-headers, or raw URLs.
+headers, or raw URLs. Provider, metadata, and playback failures are classified at the application
+boundary and HTTP responses expose only stable, sanitized messages. Bounded caches, provider execution
+policies, graceful shutdown, a hardened container, and CI quality gates complete the hardening layer.
 
 ## Requirements
 
@@ -63,6 +65,9 @@ npm run build
 ```
 
 See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/protocol constraints and the remaining Phase 0 validation items.
+Operational references are in [deployment](./docs/DEPLOYMENT.md),
+[configuration](./docs/CONFIGURATION.md), [security](./docs/SECURITY.md), and
+[troubleshooting](./docs/TROUBLESHOOTING.md).
 
 ## Implemented domain pipeline
 
@@ -95,6 +100,11 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - Opaque 192-bit configuration identifiers and configured manifest/stream routes
 - AES-256-GCM encrypted provider credentials in a replaceable SQLite-backed configuration store
 - Mask-only credential status, credential replacement/removal, provider tests, and configuration revocation
+- Typed application error categories with sanitized HTTP status, message, and provider backoff handling
+- Bounded metadata, provider-search, SKTorrent-detail, and TorBox-status caches
+- Per-provider concurrency, queue, operation-budget, and transient-retry policy
+- Safe provider/search/cache observations without queries, media IDs, URLs, or credentials
+- Graceful shutdown, explicit reverse-proxy trust, Docker deployment, and CI quality gates
 
 Production metadata and per-user search/playback dependency wiring remain intentionally unimplemented.
 The TorBox resolver is connected to the HTTP layer through injection; a real deployment must provide a

@@ -3,6 +3,11 @@ import { randomBytes } from 'node:crypto';
 import Fastify, { LogController, type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
+import {
+  ApplicationError,
+  classifyApplicationError,
+  type ApplicationErrorKind,
+} from '../application/application-error.js';
 import type { ConfigurationService } from '../application/configuration-service.js';
 import { parseConfigurationId } from '../application/configuration-service.js';
 import type { StoredConfiguration } from '../application/configuration-store.js';
@@ -75,6 +80,7 @@ export type ServerOptions = {
   providerConnectionTester?: ProviderConnectionTester;
   publicBaseUrl?: string;
   rateLimiters?: Partial<ServerRateLimiters>;
+  trustProxy?: boolean;
 };
 
 export type ServerRateLimiters = {
@@ -89,6 +95,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     logger: options.logger === true ? { level: options.logLevel ?? 'info' } : false,
     logController: new LogController({ disableRequestLogging: true }),
     bodyLimit: 128 * 1_024,
+    trustProxy: options.trustProxy ?? false,
+    forceCloseConnections: 'idle',
   });
   const rateLimiters = buildRateLimiters(options.rateLimiters);
 
@@ -118,6 +126,31 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     );
     done();
   });
+  server.setErrorHandler((error, request, reply) => {
+    const classified = classifyApplicationError(error);
+    if (classified !== undefined) return sendApplicationError(reply, classified);
+    const transportError = httpTransportError(error);
+    if (transportError?.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return reply.code(413).send({ error: 'Request body is too large' });
+    }
+    if (
+      transportError?.statusCode !== undefined &&
+      transportError.statusCode >= 400 &&
+      transportError.statusCode < 500
+    ) {
+      return reply.code(transportError.statusCode).send({ error: 'Invalid request' });
+    }
+    server.log.error(
+      {
+        requestId: request.id,
+        method: request.method,
+        route: request.routeOptions.url,
+        category: 'UnexpectedError',
+      },
+      'request failed',
+    );
+    return reply.code(500).send({ error: 'Internal server error' });
+  });
 
   server.get('/health', () => ({ status: 'ok' as const }));
   server.get('/manifest.json', () => manifest);
@@ -136,8 +169,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         request.body,
         options.publicBaseUrl ?? 'http://127.0.0.1:7000',
       );
-    } catch {
-      return reply.code(400).send({ error: 'Invalid configuration' });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return sendApplicationError(
+          reply,
+          new ApplicationError('InvalidConfiguration', { cause: error }),
+        );
+      }
+      throw error;
     }
   });
   server.get('/api/configurations/:configId', async (request, reply) => {
@@ -167,8 +206,14 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         return await reply.code(404).send({ error: 'Configuration not found' });
       }
       return value;
-    } catch {
-      return reply.code(400).send({ error: 'Invalid configuration' });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return sendApplicationError(
+          reply,
+          new ApplicationError('InvalidConfiguration', { cause: error }),
+        );
+      }
+      throw error;
     }
   });
   server.delete('/api/configurations/:configId', async (request, reply) => {
@@ -210,8 +255,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         undefined,
       );
       return { status: 'ok' as const };
-    } catch {
-      return reply.code(502).send({ error: 'Provider connection failed' });
+    } catch (error) {
+      return sendApplicationError(reply, classifyApplicationError(error, 'ProviderUnavailable'));
     }
   });
   server.get('/:configId/manifest.json', async (request, reply) => {
@@ -347,6 +392,33 @@ async function runSearch(
 
 function unavailable(reply: FastifyReply) {
   return reply.code(503).send({ error: 'Configuration storage is unavailable' });
+}
+
+function httpTransportError(error: unknown): { code?: string; statusCode?: number } | undefined {
+  return error !== null && typeof error === 'object' ? error : undefined;
+}
+
+const applicationErrorResponses: Record<
+  ApplicationErrorKind,
+  { statusCode: number; message: string }
+> = {
+  ProviderUnavailable: { statusCode: 503, message: 'Provider is temporarily unavailable' },
+  ProviderTimeout: { statusCode: 504, message: 'Provider request timed out' },
+  AuthenticationFailed: { statusCode: 502, message: 'Provider authentication failed' },
+  RateLimited: { statusCode: 429, message: 'Provider rate limit exceeded' },
+  InvalidConfiguration: { statusCode: 400, message: 'Invalid configuration' },
+  MediaNotFound: { statusCode: 404, message: 'Media not found' },
+  NoMatchingResults: { statusCode: 404, message: 'No matching results' },
+  PlaybackResolveFailed: { statusCode: 502, message: 'Playback resolution failed' },
+  TorrentUnavailable: { statusCode: 404, message: 'Torrent is unavailable' },
+};
+
+function sendApplicationError(reply: FastifyReply, error: ApplicationError) {
+  const response = applicationErrorResponses[error.kind];
+  if (error.kind === 'RateLimited' && error.retryAfterMs !== undefined) {
+    void reply.header('retry-after', String(Math.max(1, Math.ceil(error.retryAfterMs / 1_000))));
+  }
+  return reply.code(response.statusCode).send({ error: response.message });
 }
 
 function sendPlaybackError(reply: FastifyReply, error: unknown) {

@@ -3,6 +3,7 @@ import { createSktorrentSource } from '../providers/sktorrent/sktorrent-source.j
 import { createTorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import { createWebshareApiClient } from '../providers/webshare/webshare-api-client.js';
 import { createWebshareCredentialService } from '../providers/webshare/webshare-credentials.js';
+import { classifyApplicationError } from './application-error.js';
 
 export type ProviderConnectionTester = (
   provider: CredentialProvider,
@@ -17,24 +18,29 @@ export const testProviderConnection: ProviderConnectionTester = async (
   timeoutMs,
   signal,
 ) => {
-  if (provider === 'torbox' && 'apiKey' in credential) {
-    await createTorboxApiClient({ apiKey: credential.apiKey, timeoutMs }).validateAuthentication(
-      signal,
-    );
-    return;
-  }
-  if (provider === 'webshare' && 'username' in credential) {
-    const api = createWebshareApiClient({ timeoutMs });
-    await createWebshareCredentialService(api, credential).getSessionToken(signal);
-    return;
-  }
-  if (provider === 'sktorrent' && 'username' in credential) {
-    const source = createSktorrentSource(credential, { timeoutMs });
-    if (source.validateAuthentication === undefined) {
-      throw new TypeError('SKTorrent authentication test is unavailable');
+  try {
+    if (provider === 'torbox' && 'apiKey' in credential) {
+      await createTorboxApiClient({ apiKey: credential.apiKey, timeoutMs }).validateAuthentication(
+        signal,
+      );
+      return;
     }
-    await source.validateAuthentication(signal);
-    return;
+    if (provider === 'webshare' && 'username' in credential) {
+      const api = createWebshareApiClient({ timeoutMs });
+      await createWebshareCredentialService(api, credential).getSessionToken(signal);
+      return;
+    }
+    if (provider === 'sktorrent' && 'username' in credential) {
+      const source = createSktorrentSource(credential, { timeoutMs });
+      if (source.validateAuthentication === undefined) {
+        throw new TypeError('SKTorrent authentication test is unavailable');
+      }
+      await source.validateAuthentication(signal);
+      return;
+    }
+    throw new TypeError('Credential does not match provider');
+  } catch (error) {
+    signal?.throwIfAborted();
+    throw classifyApplicationError(error, 'ProviderUnavailable');
   }
-  throw new TypeError('Credential does not match provider');
 };

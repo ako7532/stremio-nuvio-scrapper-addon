@@ -1,0 +1,44 @@
+# Configuration reference
+
+Each installation URL contains only a random configuration identifier. Provider credentials are
+encrypted in server-side SQLite storage and the browser receives only configured/masked status.
+
+## Providers
+
+- **SKTorrent** requires the individual user's username and password. Direct-torrent mode returns only
+  a metainfo-verified hash. TorBox-only mode requires that user's TorBox key and never exposes the key,
+  magnet URI, or raw hash in an HTTP stream URL.
+- **Webshare** requires the individual user's username and password. Search is read-only; authentication
+  and temporary link generation happen only through server-held provider services.
+- **TorBox** is optional and uses the individual user's API key for cache checks, selected playback, and
+  explicitly configured alternative precache.
+
+Provider connection tests execute server-side and return sanitized status only. Removing a credential
+does not disable its provider toggle automatically; keep enabled providers and available credentials in
+sync.
+
+## Matching and display
+
+Resolution, source, video codec, dynamic range, size, seeders, include terms, and exclude terms are hard
+filters. Audio and subtitle preferences are independent. Strict language mode excludes releases outside
+the configured language rules; fallback mode retains suitable foreign releases when preferred releases
+are unavailable.
+
+Ranking is deterministic and follows the displayed factor order. Per-resolution limits apply before the
+overall result limit. Compact mode shortens labels; detailed mode includes the normalized release facts.
+
+## TorBox and precache
+
+Unknown cache state is never treated as uncached. Uncached results appear only when explicitly enabled.
+Precache count defaults to zero and is capped at ten. Precache starts only after a real GET successfully
+resolves the selected playback; search and HEAD remain mutation-free. Score, seeders, size, total size,
+resolution, and preferred-language limits can narrow eligible alternatives.
+
+## Advanced settings
+
+Provider timeout defaults to 8000 ms and is bounded from 1000 to 60000 ms. Safe debug is opt-in, but it
+does not permit credentials, authorization headers, configuration IDs, signed tokens, raw URLs, or
+provider response bodies to enter logs.
+
+Revoking a configuration deletes its settings and encrypted credentials. Existing installation and play
+URLs for that configuration then stop resolving.

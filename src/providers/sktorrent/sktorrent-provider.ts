@@ -2,6 +2,10 @@ import type { SearchQuery } from '../../domain/media.js';
 import type { TorrentProviderResult } from '../../domain/release.js';
 import { parseRelease } from '../../release/release-parser.js';
 import type { ProviderCapabilities, ProviderSearchContext, StreamProvider } from '../provider.js';
+import {
+  createCachedSktorrentSource,
+  type SktorrentSourceCacheOptions,
+} from './sktorrent-cache.js';
 import type { SktorrentSource } from './sktorrent-source.js';
 import { parseSktorrentTorrent } from './sktorrent-torrent-parser.js';
 import type { SktorrentListingResult } from './sktorrent-types.js';
@@ -9,6 +13,7 @@ import type { SktorrentListingResult } from './sktorrent-types.js';
 export type SktorrentProviderOptions = {
   maximumDetails?: number;
   detailConcurrency?: number;
+  detailCache?: false | SktorrentSourceCacheOptions;
 };
 
 const capabilities: ProviderCapabilities = {
@@ -25,14 +30,21 @@ export const createSktorrentProvider = (
 ): StreamProvider => {
   const maximumDetails = positiveInteger(options.maximumDetails ?? 12, 'maximum details');
   const detailConcurrency = positiveInteger(options.detailConcurrency ?? 3, 'detail concurrency');
+  const providerSource =
+    options.detailCache === false
+      ? source
+      : createCachedSktorrentSource(source, options.detailCache);
 
   return {
     name: 'sktorrent',
     capabilities,
     async search(query, context) {
-      const listings = (await source.search(query.value, context.signal)).slice(0, maximumDetails);
+      const listings = (await providerSource.search(query.value, context.signal)).slice(
+        0,
+        maximumDetails,
+      );
       return mapWithConcurrency(listings, detailConcurrency, (listing) =>
-        normalizeListing(source, listing, query, context),
+        normalizeListing(providerSource, listing, query, context),
       );
     },
   };

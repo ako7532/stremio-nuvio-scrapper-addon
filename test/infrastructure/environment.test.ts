@@ -8,11 +8,18 @@ describe('environment', () => {
       HOST: '0.0.0.0',
       PORT: 7000,
       LOG_LEVEL: 'info',
+      TRUST_PROXY: false,
+      SHUTDOWN_TIMEOUT_MS: 10_000,
     });
   });
 
   it('rejects invalid ports', () => {
     expect(() => parseEnvironment({ PORT: '70000' })).toThrow();
+  });
+
+  it('requires an explicit boolean reverse-proxy setting', () => {
+    expect(parseEnvironment({ TRUST_PROXY: 'true' }).TRUST_PROXY).toBe(true);
+    expect(() => parseEnvironment({ TRUST_PROXY: '1' })).toThrow();
   });
 
   it('allows only HTTPS or local HTTP addon URLs', () => {

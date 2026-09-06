@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildServer } from '../../src/http/server.js';
+import { ApplicationError } from '../../src/application/application-error.js';
 import type { SearchStreams } from '../../src/application/search-streams.js';
 import type { TorboxPlaybackResolver } from '../../src/application/torbox-playback.js';
 import { createFixedWindowRateLimiter } from '../../src/infrastructure/fixed-window-rate-limiter.js';
@@ -108,6 +109,40 @@ describe('Stremio HTTP contract', () => {
     const response = await server.inject({ method: 'GET', url: '/stream/series/tt1234567.json' });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it('returns sanitized application errors and provider backoff', async () => {
+    const searchStreams: SearchStreams = {
+      search: vi.fn().mockRejectedValue(
+        new ApplicationError('RateLimited', {
+          cause: new Error('secret provider response'),
+          retryAfterMs: 2_500,
+        }),
+      ),
+    };
+    const server = buildServer({ searchStreams });
+    servers.push(server);
+
+    const response = await server.inject({ method: 'GET', url: '/stream/movie/tt0111161.json' });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['retry-after']).toBe('3');
+    expect(response.json()).toEqual({ error: 'Provider rate limit exceeded' });
+    expect(response.body).not.toContain('secret provider response');
+  });
+
+  it('does not expose unexpected error messages', async () => {
+    const searchStreams: SearchStreams = {
+      search: vi.fn().mockRejectedValue(new Error('secret internal failure')),
+    };
+    const server = buildServer({ searchStreams });
+    servers.push(server);
+
+    const response = await server.inject({ method: 'GET', url: '/stream/movie/tt0111161.json' });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: 'Internal server error' });
+    expect(response.body).not.toContain('secret internal failure');
   });
 
   it('keeps HEAD playback read-only and redirects real GET playback', async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createTorboxCacheEnricher } from '../../src/application/torbox-cache-enricher.js';
+import type { CacheObserver } from '../../src/infrastructure/cache-observer.js';
 import type { RankedResult, TorrentProviderResult } from '../../src/domain/release.js';
 import type { TorboxApiClient } from '../../src/providers/torbox/torbox-api-client.js';
 
@@ -52,6 +53,45 @@ describe('TorBox cache enricher', () => {
     });
 
     expect(value?.result).toMatchObject({ cacheStatus: 'unknown' });
+  });
+
+  it('bounds retained cache entries', async () => {
+    const checkCached = vi
+      .fn<TorboxApiClient['checkCached']>()
+      .mockImplementation((hashes) =>
+        Promise.resolve(hashes.map((hash) => ({ hash, status: 'cached' as const }))),
+      );
+    const enricher = createTorboxCacheEnricher(client({ checkCached }), { maximumEntries: 2 });
+    const context = { signal: new AbortController().signal, correlationId: 'request-3' };
+
+    await enricher([ranked('a'), ranked('b'), ranked('c')], context);
+    await enricher([ranked('a')], context);
+
+    expect(checkCached).toHaveBeenCalledTimes(2);
+    expect(checkCached.mock.calls[1]?.[0]).toEqual(['a'.repeat(40)]);
+  });
+
+  it('reports aggregate cache hits without hashes', async () => {
+    const observer = vi.fn<CacheObserver>();
+    const checkCached = vi
+      .fn<TorboxApiClient['checkCached']>()
+      .mockImplementation((hashes) =>
+        Promise.resolve(hashes.map((hash) => ({ hash, status: 'cached' as const }))),
+      );
+    const enricher = createTorboxCacheEnricher(client({ checkCached }), { observer });
+    const context = { signal: new AbortController().signal, correlationId: 'request-4' };
+
+    await enricher([ranked('a')], context);
+    await enricher([ranked('a')], context);
+
+    expect(observer).toHaveBeenLastCalledWith({
+      cache: 'torbox-status',
+      provider: 'torbox',
+      correlationId: 'request-4',
+      hitCount: 1,
+      missCount: 0,
+    });
+    expect(JSON.stringify(observer.mock.calls)).not.toContain('aaaaaaaaaaaaaaaa');
   });
 });
 

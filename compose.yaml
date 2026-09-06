@@ -1,0 +1,25 @@
+services:
+  addon:
+    build: .
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - '7000:7000'
+    environment:
+      ADDON_BASE_URL: ${ADDON_BASE_URL:?Set ADDON_BASE_URL to the public HTTPS URL}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?Set CONFIG_ENCRYPTION_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      SHUTDOWN_TIMEOUT_MS: ${SHUTDOWN_TIMEOUT_MS:-10000}
+    volumes:
+      - addon-data:/data
+    tmpfs:
+      - /tmp
+
+volumes:
+  addon-data:

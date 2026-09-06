@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createSearchStreams } from '../../src/application/search-streams.js';
+import type { SearchObserver } from '../../src/application/search-observability.js';
 import type { UserConfiguration } from '../../src/domain/configuration.js';
 import type {
   FileProviderResult,
@@ -74,12 +75,14 @@ describe('SearchStreams', () => {
       search: successfulSearch,
     };
     const cacheEnricher = vi.fn((results: readonly RankedResult[]) => Promise.resolve(results));
+    const observer = vi.fn<SearchObserver>();
     const searchStreams = createSearchStreams({
       metadataResolver,
       providers: [failedProvider, successfulProvider],
       configuration,
       cacheEnricher,
       websharePlaybackUrl: () => 'https://addon.example/play/opaque-token',
+      observer,
     });
 
     const streams = await searchStreams.search(
@@ -98,6 +101,21 @@ describe('SearchStreams', () => {
         behaviorHints: { filename: result.filename },
       }),
     ]);
+    expect(observer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'provider-error',
+        provider: 'sktorrent',
+        category: 'ProviderUnavailable',
+        correlationId: 'request-1',
+      }),
+    );
+    expect(observer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'search-complete',
+        returnedResultCount: 1,
+        correlationId: 'request-1',
+      }),
+    );
   });
 
   it('keeps TorBox search side-effect free and hides unknown or disabled uncached results', async () => {
