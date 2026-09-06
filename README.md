@@ -2,7 +2,7 @@
 
 An early-stage, self-hosted Stremio protocol addon designed to aggregate normalized stream results from SKTorrent and Webshare, with optional TorBox resolution.
 
-The project is currently in Phase 1. The server exposes a valid manifest, health endpoint, and an empty stream response while provider logic is developed behind tested domain boundaries. The manifest will advertise configuration support only once the configure route exists.
+The project has its Phase 1 skeleton and provider-independent Phase 2 parsing/matching foundation. The server exposes a valid manifest, health endpoint, and an empty stream response while provider integrations are developed behind tested domain boundaries. The manifest will advertise configuration support only once the configure route exists.
 
 ## Requirements
 
@@ -35,3 +35,13 @@ npm run build
 ```
 
 See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/protocol constraints and the remaining Phase 0 validation items.
+
+## Implemented domain pipeline
+
+- Ordered metadata resolver/source contracts with cancellation support
+- CZ/SK-aware title normalization and deduplicated movie/episode query generation
+- Provider-independent quality, codec, HDR, audio, and language parsing
+- Separate scored movie and episode matchers
+- Single-episode, multi-episode, and season-pack recognition
+
+Provider playback and TorBox mutations remain intentionally unimplemented until credential-backed behavior is verified.

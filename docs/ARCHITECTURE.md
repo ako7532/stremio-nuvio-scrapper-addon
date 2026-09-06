@@ -7,6 +7,9 @@ The addon uses one Stremio HTTP protocol implementation for both Stremio and Nuv
 - `http`: transport validation and Stremio response formatting.
 - `application`: orchestration use cases; added as each vertical slice needs them.
 - `domain`: provider-independent media, release, ranking, and configuration types.
+- `metadata`: resolver contracts, title normalization, and search query generation.
+- `release`: centralized provider-independent release-name parsing.
+- `matching`: separate scored movie and episode matching rules.
 - `providers`: capability contracts and provider-specific adapters.
 - `infrastructure`: environment, HTTP, persistence, caching, logging, and secrets.
 

@@ -1,0 +1,94 @@
+import { describe, expect, it } from 'vitest';
+
+import type { MediaMetadata } from '../../src/domain/media.js';
+import { matchEpisode, parseEpisodeCoverage } from '../../src/matching/episode-matcher.js';
+
+const metadata: MediaMetadata = {
+  type: 'series',
+  id: 'tt5753856',
+  originalTitle: 'Dark',
+  alternativeTitles: [],
+  season: 1,
+  episode: 4,
+  year: 2017,
+};
+
+describe('episode matcher', () => {
+  it('accepts the requested single episode', () => {
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.S01E04.1080p.WEB-DL',
+      }),
+    ).toMatchObject({ matched: true, score: 100, kind: 'single-episode' });
+  });
+
+  it('rejects another episode and another season', () => {
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.S01E05.1080p.WEB-DL',
+      }),
+    ).toMatchObject({ matched: false, reasons: ['episode mismatch'] });
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.S02E04.1080p.WEB-DL',
+      }),
+    ).toMatchObject({ matched: false, reasons: ['season mismatch'] });
+  });
+
+  it('accepts multi-episode releases only when they cover the requested episode', () => {
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.S01E03E04E05.1080p',
+      }),
+    ).toMatchObject({ matched: true, kind: 'multi-episode' });
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.S01E01-E06.1080p',
+      }),
+    ).toMatchObject({ matched: true, kind: 'multi-episode' });
+  });
+
+  it('accepts matching season packs but not packs for another season', () => {
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.S01.Complete.1080p',
+      }),
+    ).toMatchObject({ matched: true, score: 85, kind: 'season-pack' });
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.Season.2.Complete.1080p',
+      }).matched,
+    ).toBe(false);
+  });
+
+  it('requires an explicit episode or pack marker', () => {
+    expect(
+      matchEpisode(metadata, {
+        mediaType: 'series',
+        title: 'Dark',
+        releaseName: 'Dark.1080p.WEB-DL',
+      }),
+    ).toMatchObject({ matched: false, reasons: ['episode marker missing'] });
+  });
+});
+
+describe('episode coverage parsing', () => {
+  it('expands common ranges and recognizes alternate notation', () => {
+    expect(parseEpisodeCoverage('Show.S01E03-E05')?.episodes).toEqual(new Set([3, 4, 5]));
+    expect(parseEpisodeCoverage('Show.1x03-05')?.episodes).toEqual(new Set([3, 4, 5]));
+  });
+});

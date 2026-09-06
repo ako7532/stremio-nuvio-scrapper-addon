@@ -54,7 +54,7 @@ export type ParsedRelease = {
   source: SourceType;
   videoCodec: VideoCodec;
   dynamicRange: DynamicRange;
-  audioCodec: AudioCodec;
+  audioCodecs: readonly AudioCodec[];
   audioChannels?: string;
   languages: LanguageInfo;
   releaseGroup?: string;
