@@ -6,10 +6,11 @@ The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/match
 fixture-backed Phase 3 SKTorrent provider, Phase 4 Webshare provider layer, and Phase 5 aggregation
 pipeline. Phase 6 adds an injectable TorBox transport, cache enrichment, and secure playback resolver.
 Phase 7 adds bounded, play-triggered TorBox precache orchestration.
-The server exposes a valid manifest and health endpoint; its stream route accepts the
-aggregation use case through dependency injection while production provider/configuration wiring
-remains deferred until secure per-user configuration exists. The manifest will advertise configuration
-support only once the configure route exists.
+Phase 8 adds the responsive configure page, encrypted per-user SQLite configuration storage,
+masked credential status, credential replacement/removal, provider connection tests, opaque configured
+manifest URLs, and revocation. The server stream route accepts the aggregation use case through
+dependency injection; concrete metadata-source and per-user playback wiring remain separate from the
+configuration slice.
 
 ## Requirements
 
@@ -23,12 +24,27 @@ npm install
 npm run dev
 ```
 
+Create a `.env` file before startup. `CONFIG_ENCRYPTION_KEY` must be a stable, private,
+base64-encoded 32-byte key; changing or losing it makes saved credentials unreadable.
+
+```dotenv
+CONFIG_ENCRYPTION_KEY=<base64-encoded 32-byte key>
+CONFIG_DATABASE_PATH=addon.sqlite
+ADDON_BASE_URL=http://127.0.0.1:7000
+```
+
+Use HTTPS for `ADDON_BASE_URL` outside local development. Both `.env` and SQLite database files are
+ignored by Git.
+
 The default server address is `http://127.0.0.1:7000` when accessed locally. It listens on `0.0.0.0` so it also works in a container.
 
 Useful endpoints:
 
 - `GET /health`
 - `GET /manifest.json`
+- `GET /configure`
+- `GET /:configurationId/manifest.json`
+- `GET /:configurationId/stream/movie/tt0111161.json`
 - `GET /stream/movie/tt0111161.json`
 
 ## Quality gates
@@ -70,8 +86,12 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - TorBox-only playback that never exposes API keys, magnet links, or raw info hashes to clients
 - Ranked alternative precache with cache/account deduplication and configurable safety limits
 - Once-only background precache with per-user operation budgets and provider backoff
+- Responsive configuration UI with mobile-friendly provider, filter, language, sorting, and display controls
+- Opaque 192-bit configuration identifiers and configured manifest/stream routes
+- AES-256-GCM encrypted provider credentials in a replaceable SQLite-backed configuration store
+- Mask-only credential status, credential replacement/removal, provider tests, and configuration revocation
 
-Production dependency wiring and persistent per-user configuration remain intentionally unimplemented.
+Production metadata and per-user search/playback dependency wiring remain intentionally unimplemented.
 The TorBox resolver is connected to the HTTP layer through injection; a real deployment must provide a
 server-held credential store, token secret, client factory, cache enricher, playback URL factory, and
 precache scheduler. Search and HEAD remain side-effect free. After a real GET has successfully resolved

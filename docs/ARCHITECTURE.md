@@ -72,6 +72,19 @@ extensions remain out of scope.
 
 Provider credentials stay in encrypted server-side configuration storage and never appear in manifest, stream, play URLs, frontend state, or logs.
 
+## Configuration and persistence
+
+The configure page talks to a narrow application service rather than SQLite directly. Its repository
+contract stores the public `UserConfiguration` separately from an encrypted credential envelope, so a
+later PostgreSQL adapter can replace SQLite without changing the domain or HTTP contract. SQLite uses a
+strict table and AES-256-GCM protects credentials with a master key supplied only through
+`CONFIG_ENCRYPTION_KEY`.
+
+New configurations receive a random 192-bit URL-safe identifier. API responses return settings and a
+masked credential status only; saved passwords and API keys are never returned to the browser.
+Credentials can be replaced, explicitly removed, tested server-side, or destroyed by revoking the
+whole configuration. Configured manifest and stream paths contain only the opaque identifier.
+
 ## SKTorrent parser boundary
 
 The SKTorrent listing and detail parsers consume HTML strings and perform no network requests. They

@@ -24,8 +24,8 @@ describe('Stremio HTTP contract', () => {
       types: ['movie', 'series'],
       idPrefixes: ['tt'],
       behaviorHints: {
-        configurable: false,
-        configurationRequired: false,
+        configurable: true,
+        configurationRequired: true,
       },
     });
   });

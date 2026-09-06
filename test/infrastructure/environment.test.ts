@@ -14,4 +14,11 @@ describe('environment', () => {
   it('rejects invalid ports', () => {
     expect(() => parseEnvironment({ PORT: '70000' })).toThrow();
   });
+
+  it('allows only HTTPS or local HTTP addon URLs', () => {
+    expect(() => parseEnvironment({ ADDON_BASE_URL: 'http://public.example' })).toThrow();
+    expect(parseEnvironment({ ADDON_BASE_URL: 'https://addon.example/base/' }).ADDON_BASE_URL).toBe(
+      'https://addon.example/base/',
+    );
+  });
 });

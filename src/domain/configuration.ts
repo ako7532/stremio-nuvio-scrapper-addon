@@ -28,6 +28,9 @@ export type RankingFactor =
   | 'provider';
 
 export type UserConfiguration = {
+  general?: {
+    metadataLanguage: string;
+  };
   providers: {
     sktorrent: {
       enabled: boolean;
@@ -64,4 +67,29 @@ export type UserConfiguration = {
   display: {
     mode: 'compact' | 'detailed';
   };
+  advanced?: {
+    providerTimeoutMs: number;
+    safeDebug: boolean;
+  };
 };
+
+export type ProviderCredentials = {
+  sktorrent?: { username: string; password: string };
+  webshare?: { username: string; password: string };
+  torbox?: { apiKey: string };
+};
+
+export type CredentialProvider = keyof ProviderCredentials;
+
+export const rankingFactors: readonly RankingFactor[] = [
+  'cached',
+  'language',
+  'resolution',
+  'source',
+  'hdr',
+  'videoCodec',
+  'audioQuality',
+  'seeders',
+  'size',
+  'provider',
+];

@@ -137,3 +137,7 @@ These items prevent Phase 0 from being called fully complete:
   separate best-effort policy started only after selected playback resolves; search and HEAD remain
   mutation-free. Its candidate count is capped at 10, its default per-user uncached-create budget is
   60 per hour, and provider `Retry-After` responses stop further work and establish backoff.
+- Phase 8 persists public settings and provider credentials through a small repository boundary.
+  The self-hosted adapter uses SQLite and an AES-256-GCM envelope keyed only from the server
+  environment. Browser responses expose mask-only credential status, while configured manifest and
+  stream URLs contain a random opaque identifier rather than any credential.

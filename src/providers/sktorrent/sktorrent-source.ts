@@ -16,6 +16,7 @@ export type SktorrentCredentials = {
 };
 
 export type SktorrentSource = {
+  validateAuthentication?(signal?: AbortSignal): Promise<void>;
   search(query: string, signal?: AbortSignal): Promise<readonly SktorrentListingResult[]>;
   getDetail(result: SktorrentListingResult, signal?: AbortSignal): Promise<SktorrentDetail>;
   downloadTorrent(detail: SktorrentDetail, signal?: AbortSignal): Promise<Uint8Array>;
@@ -57,6 +58,11 @@ export const createSktorrentSource = (
   };
 
   return {
+    async validateAuthentication(signal) {
+      signal?.throwIfAborted();
+      await authenticatedCookie();
+      signal?.throwIfAborted();
+    },
     async search(query, signal) {
       return parseSktorrentListing(
         await htmlClient.getHtml(buildSktorrentListingUrl(query), signal),

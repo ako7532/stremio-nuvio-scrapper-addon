@@ -7,7 +7,7 @@ export const manifest = {
   types: ['movie', 'series'],
   idPrefixes: ['tt'],
   behaviorHints: {
-    configurable: false,
-    configurationRequired: false,
+    configurable: true,
+    configurationRequired: true,
   },
 } as const;
