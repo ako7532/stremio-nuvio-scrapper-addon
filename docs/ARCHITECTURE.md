@@ -39,5 +39,17 @@ The SKTorrent listing and detail parsers consume HTML strings and perform no net
 extract only fields represented in sanitized fixtures and throw `SktorrentParserError` when required
 structural invariants disappear. Valid pages with the observed no-results marker return an empty list.
 
-The site's 40-character detail identifier remains an opaque provider ID. It does not enter the common
-`TorrentProviderResult` model as `infoHash`, and the parsed download path is not fetched by this layer.
+The site's 40-character detail identifier remains an opaque provider ID until authenticated torrent
+metadata is downloaded. The torrent parser hashes the exact raw bencoded `info` dictionary and emits an
+`infoHash` and magnet URI only when that hash equals the provider ID. The HTML parser itself never makes
+that assertion or fetches the parsed download path.
+
+The separate SKTorrent HTTP client performs anonymous read-only GET requests with a bounded timeout and
+response size. Listing URL construction uses explicit search parameters, detail URLs are restricted to
+the observed SKTorrent origin and path, redirects are rejected, and responses are parsed only after the
+transport succeeds. It does not send credentials, retry requests, or fetch torrent download paths.
+
+The authenticated SKTorrent source owns its short-lived login-cookie session and never exposes it to
+parsers or normalized results. The provider caps listing candidates before resolving details, processes
+details with bounded concurrency, downloads torrent metadata through an ID-checked provider URL, and
+normalizes a result only after the torrent parser verifies its info hash.

@@ -74,7 +74,18 @@ Live anonymous requests confirmed:
 - Detail pages expose title, category/language flag, size, file list, peer counts, description-level language/subtitle fields, MediaInfo, and a torrent download URL.
 - Torrent download returned an authorization error for an anonymous session even though search and detail were accessible.
 
-The 40-hex `id` is highly likely to be the BitTorrent v1 info hash, but that is still an inference. It must be proven against an authenticated `.torrent` fixture before the provider emits it as an `infoHash`. Search and detail parsers must be independent from HTTP and covered by sanitized fixtures.
+An authenticated download of the CC BY 3.0 licensed Sintel open movie returned a valid BitTorrent
+metainfo file. SHA-1 of its raw bencoded `info` dictionary was
+`9ca7792139b16d7f68132ed46ce79f649a72b45b`, exactly matching the 40-hex detail `id`. The repository
+fixture preserves that `info` dictionary but replaces tracker metadata with a non-routable example URL;
+it contains no credentials, session cookies, or account passkey.
+
+This verifies that the observed SKTorrent detail ID can be emitted as the BitTorrent v1 `infoHash` only
+after downloaded torrent metadata passes the same equality check. A mismatch is a provider error; the
+implementation must not blindly trust a 40-hex page value. Search and detail parsers remain independent
+from HTTP and are covered by sanitized fixtures.
+
+License source: [official Sintel project page](https://durian.blender.org/about/)
 
 No stable public API was found. Treat the HTML as an unstable provider contract, use conservative concurrency/timeouts, and fail the provider explicitly when structural invariants disappear.
 
@@ -82,15 +93,15 @@ No stable public API was found. Treat the HTML as an unstable provider contract,
 
 These items prevent Phase 0 from being called fully complete:
 
-1. **SKTorrent hash and authentication:** download one legally shareable torrent using a test account, calculate its v1 info hash, compare it with the detail `id`, and determine whether login cookies or constructed magnets are the supported retrieval route.
-2. **TorBox response fixtures:** with a test API key, capture sanitized responses for user validation, cached/uncached checks, create-torrent, account list, and request-download-link. Confirm current 429 and `Retry-After` behavior.
-3. **Webshare response fixtures:** with a test account, validate the current token transport and whether `video_stream` links support HEAD, Range, and redirect-based playback.
-4. **Client matrix:** deploy the resolver over HTTPS and exercise 302/307 redirects, HEAD, and repeated Range requests on Stremio Desktop, Android, Web, and Nuvio. This is a manual/device test and cannot be established from protocol docs alone.
-5. **Series identifiers:** confirm all incoming Stremio/Nuvio series ID shapes to parse season/episode without accepting false positives.
+1. **TorBox response fixtures:** with a test API key, capture sanitized responses for user validation, cached/uncached checks, create-torrent, account list, and request-download-link. Confirm current 429 and `Retry-After` behavior.
+2. **Webshare response fixtures:** with a test account, validate the current token transport and whether `video_stream` links support HEAD, Range, and redirect-based playback.
+3. **Client matrix:** deploy the resolver over HTTPS and exercise 302/307 redirects, HEAD, and repeated Range requests on Stremio Desktop, Android, Web, and Nuvio. This is a manual/device test and cannot be established from protocol docs alone.
+4. **Series identifiers:** confirm all incoming Stremio/Nuvio series ID shapes to parse season/episode without accepting false positives.
 
 ## Implementation consequences
 
 - Phase 1 can proceed now: strict project skeleton, protocol routes, domain contracts, and tests do not depend on the open items.
 - Phase 2 can proceed with pure metadata/query/parser/matcher code.
-- SKTorrent playback, Webshare playback, and TorBox mutation work must wait for sanitized credential-backed fixtures.
+- SKTorrent direct-torrent normalization may proceed with mandatory downloaded-metainfo verification;
+  Webshare playback and TorBox mutation work still require their own sanitized credential-backed fixtures.
 - Search handlers must remain side-effect free. TorBox create and precache operations belong only in the playback resolver.

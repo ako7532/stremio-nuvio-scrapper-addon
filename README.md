@@ -2,7 +2,10 @@
 
 An early-stage, self-hosted Stremio protocol addon designed to aggregate normalized stream results from SKTorrent and Webshare, with optional TorBox resolution.
 
-The project has its Phase 1 skeleton and provider-independent Phase 2 parsing/matching foundation. The server exposes a valid manifest, health endpoint, and an empty stream response while provider integrations are developed behind tested domain boundaries. The manifest will advertise configuration support only once the configure route exists.
+The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation, and
+fixture-backed Phase 3 SKTorrent provider. The server exposes a valid manifest, health endpoint, and an
+empty stream response until provider aggregation is connected in Phase 5. The manifest will advertise
+configuration support only once the configure route exists.
 
 ## Requirements
 
@@ -44,8 +47,11 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - Separate scored movie and episode matchers
 - Single-episode, multi-episode, and season-pack recognition
 - HTTP-independent SKTorrent listing/detail parsers backed by sanitized HTML fixtures
+- Bounded read-only SKTorrent HTML transport and allowlisted listing/detail URL construction
+- Authenticated SKTorrent torrent retrieval with mandatory info-hash verification
+- Normalized SKTorrent provider results with bounded detail concurrency
 
 Provider playback and TorBox mutations remain intentionally unimplemented until credential-backed behavior is verified.
-The 40-character SKTorrent detail identifier is currently treated as opaque data, not as a BitTorrent
-info hash. The parser exposes no magnet URI or playable torrent result until that relationship is proven
-with an authenticated torrent fixture.
+An authenticated, sanitized fixture proves that the observed 40-character SKTorrent detail identifier
+matches the BitTorrent v1 info hash. Torrent metadata parsing still verifies that equality before it may
+emit an `infoHash` or magnet URI; page identifiers are never trusted without the downloaded metainfo.
