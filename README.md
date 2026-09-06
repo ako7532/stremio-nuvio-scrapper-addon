@@ -43,5 +43,9 @@ See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/proto
 - Provider-independent quality, codec, HDR, audio, and language parsing
 - Separate scored movie and episode matchers
 - Single-episode, multi-episode, and season-pack recognition
+- HTTP-independent SKTorrent listing/detail parsers backed by sanitized HTML fixtures
 
 Provider playback and TorBox mutations remain intentionally unimplemented until credential-backed behavior is verified.
+The 40-character SKTorrent detail identifier is currently treated as opaque data, not as a BitTorrent
+info hash. The parser exposes no magnet URI or playable torrent result until that relationship is proven
+with an authenticated torrent fixture.

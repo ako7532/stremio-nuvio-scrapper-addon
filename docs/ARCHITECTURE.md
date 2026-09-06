@@ -32,3 +32,12 @@ Providers will be isolated with timeouts and settled independently. One failed p
 Search is read-only. Results needing Webshare or TorBox resolution point to a short-lived addon-owned play URL. Only a validated GET to that resolver may create/resolve a selected torrent and schedule precache. HEAD is read-only, and idempotency prevents repeated Range requests from scheduling the same work again.
 
 Provider credentials stay in encrypted server-side configuration storage and never appear in manifest, stream, play URLs, frontend state, or logs.
+
+## SKTorrent parser boundary
+
+The SKTorrent listing and detail parsers consume HTML strings and perform no network requests. They
+extract only fields represented in sanitized fixtures and throw `SktorrentParserError` when required
+structural invariants disappear. Valid pages with the observed no-results marker return an empty list.
+
+The site's 40-character detail identifier remains an opaque provider ID. It does not enter the common
+`TorrentProviderResult` model as `infoHash`, and the parsed download path is not fetched by this layer.
