@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildServer } from '../../src/http/server.js';
 import type { SearchStreams } from '../../src/application/search-streams.js';
 import type { TorboxPlaybackResolver } from '../../src/application/torbox-playback.js';
+import { createFixedWindowRateLimiter } from '../../src/infrastructure/fixed-window-rate-limiter.js';
 
 const servers: ReturnType<typeof buildServer>[] = [];
 
@@ -19,6 +20,7 @@ describe('Stremio HTTP contract', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['access-control-allow-origin']).toBe('*');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.json()).toMatchObject({
       resources: ['stream'],
       types: ['movie', 'series'],
@@ -28,6 +30,24 @@ describe('Stremio HTTP contract', () => {
         configurationRequired: true,
       },
     });
+  });
+
+  it('rate limits stream requests using the client address', async () => {
+    const server = buildServer({
+      searchStreams: { search: vi.fn().mockResolvedValue([]) },
+      rateLimiters: {
+        search: createFixedWindowRateLimiter({ maximumAttempts: 1, windowMs: 5_000 }),
+      },
+    });
+    servers.push(server);
+
+    const first = await server.inject({ method: 'GET', url: '/stream/movie/tt0111161.json' });
+    const limited = await server.inject({ method: 'GET', url: '/stream/movie/tt0111161.json' });
+
+    expect(first.statusCode).toBe(200);
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBe('5');
+    expect(limited.json()).toEqual({ error: 'Too many requests' });
   });
 
   it('returns a valid empty stream response until providers are connected', async () => {

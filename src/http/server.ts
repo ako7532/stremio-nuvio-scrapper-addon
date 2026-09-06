@@ -1,4 +1,6 @@
-import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
+import { randomBytes } from 'node:crypto';
+
+import Fastify, { LogController, type FastifyInstance, type FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import type { ConfigurationService } from '../application/configuration-service.js';
@@ -12,6 +14,10 @@ import {
 } from '../application/torbox-playback.js';
 import type { MediaRequest } from '../domain/media.js';
 import { mediaTypes } from '../domain/media.js';
+import {
+  createFixedWindowRateLimiter,
+  type RateLimiter,
+} from '../infrastructure/fixed-window-rate-limiter.js';
 import { TorboxTransportError } from '../providers/torbox/torbox-api-client.js';
 import { PlayTokenError } from '../security/play-token.js';
 import { configurePage } from './configure-page.js';
@@ -51,35 +57,79 @@ const providerTestSchema = z.strictObject({
     .nullable()
     .optional(),
 });
+const corsRoutes = new Set([
+  '/manifest.json',
+  '/stream/:type/:id.json',
+  '/:configId/manifest.json',
+  '/:configId/stream/:type/:id.json',
+  '/play/:token',
+]);
 
 export type ServerOptions = {
   logger?: boolean;
+  logLevel?: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
   searchStreams?: SearchStreams;
   torboxPlaybackResolver?: TorboxPlaybackResolver;
   configurationService?: ConfigurationService;
   searchStreamsForConfiguration?: (configuration: StoredConfiguration) => SearchStreams | undefined;
   providerConnectionTester?: ProviderConnectionTester;
   publicBaseUrl?: string;
+  rateLimiters?: Partial<ServerRateLimiters>;
+};
+
+export type ServerRateLimiters = {
+  configuration: RateLimiter;
+  providerTest: RateLimiter;
+  search: RateLimiter;
+  playback: RateLimiter;
 };
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
-  const server = Fastify({ logger: options.logger ?? false });
+  const server = Fastify({
+    logger: options.logger === true ? { level: options.logLevel ?? 'info' } : false,
+    logController: new LogController({ disableRequestLogging: true }),
+    bodyLimit: 128 * 1_024,
+  });
+  const rateLimiters = buildRateLimiters(options.rateLimiters);
 
-  server.addHook('onSend', (_request, reply, _payload, done) => {
-    void reply.header('access-control-allow-origin', '*');
+  server.addHook('onSend', (request, reply, _payload, done) => {
+    if (request.routeOptions.url !== undefined && corsRoutes.has(request.routeOptions.url)) {
+      void reply.header('access-control-allow-origin', '*');
+    }
+    void reply.header('x-content-type-options', 'nosniff');
+    void reply.header('x-frame-options', 'DENY');
+    void reply.header('referrer-policy', 'no-referrer');
+    void reply.header('permissions-policy', 'camera=(), microphone=(), geolocation=()');
+    if (request.url.startsWith('/configure') || request.url.startsWith('/api/')) {
+      void reply.header('cache-control', 'no-store');
+    }
+    done();
+  });
+  server.addHook('onResponse', (request, reply, done) => {
+    server.log.info(
+      {
+        requestId: request.id,
+        method: request.method,
+        route: request.routeOptions.url,
+        statusCode: reply.statusCode,
+        durationMs: Math.round(reply.elapsedTime),
+      },
+      'request completed',
+    );
     done();
   });
 
   server.get('/health', () => ({ status: 'ok' as const }));
   server.get('/manifest.json', () => manifest);
-  server.get('/configure', (_request, reply) => reply.type('text/html').send(configurePage()));
+  server.get('/configure', (_request, reply) => sendConfigurePage(reply));
   server.get('/configure/:configId', (request, reply) => {
     const configId = configuredId(request.params);
     return configId === undefined
       ? reply.code(404).type('text/plain').send('Configuration not found')
-      : reply.type('text/html').send(configurePage(configId));
+      : sendConfigurePage(reply, configId);
   });
   server.post('/api/configurations', async (request, reply) => {
+    if (!consumeRateLimit(rateLimiters.configuration, request.ip, reply)) return;
     if (options.configurationService === undefined) return unavailable(reply);
     try {
       return await options.configurationService.create(
@@ -102,6 +152,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     return value ?? reply.code(404).send({ error: 'Configuration not found' });
   });
   server.put('/api/configurations/:configId', async (request, reply) => {
+    if (!consumeRateLimit(rateLimiters.configuration, request.ip, reply)) return;
     const configId = configuredId(request.params);
     if (configId === undefined || options.configurationService === undefined) {
       return reply.code(404).send({ error: 'Configuration not found' });
@@ -121,6 +172,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     }
   });
   server.delete('/api/configurations/:configId', async (request, reply) => {
+    if (!consumeRateLimit(rateLimiters.configuration, request.ip, reply)) return;
     const configId = configuredId(request.params);
     if (configId === undefined || options.configurationService === undefined) {
       return reply.code(404).send({ error: 'Configuration not found' });
@@ -134,6 +186,11 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     const body = providerTestSchema.safeParse(request.body);
     if (!provider.success || !body.success || options.providerConnectionTester === undefined) {
       return reply.code(400).send({ error: 'Invalid provider test' });
+    }
+    if (
+      !consumeRateLimit(rateLimiters.providerTest, `${request.ip}:${provider.data.provider}`, reply)
+    ) {
+      return;
     }
     const stored =
       body.data.configurationId === undefined || options.configurationService === undefined
@@ -175,6 +232,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     if (configId === undefined || mediaRequest === undefined) {
       return reply.code(400).send({ error: 'Invalid stream request' });
     }
+    if (!consumeRateLimit(rateLimiters.search, `configuration:${configId}`, reply)) return;
     const stored = await options.configurationService.getStored(configId);
     if (stored === undefined) return reply.code(404).send({ error: 'Configuration not found' });
     const searchStreams = options.searchStreamsForConfiguration?.(stored);
@@ -191,6 +249,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     if (mediaRequest === undefined) {
       return reply.code(400).send({ error: 'Invalid stream request' });
     }
+    if (!consumeRateLimit(rateLimiters.search, `address:${request.ip}`, reply)) return;
     if (options.searchStreams === undefined) return { streams: [] };
 
     const streams = await runSearch(request, options.searchStreams, mediaRequest);
@@ -205,6 +264,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       if (!parsed.success || options.torboxPlaybackResolver === undefined) {
         return reply.code(404).send({ error: 'Playback reference not found' });
       }
+      if (!consumeRateLimit(rateLimiters.playback, request.ip, reply)) return;
       const controller = new AbortController();
       request.raw.once('aborted', () => {
         controller.abort();
@@ -226,6 +286,38 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   return server;
+}
+
+function sendConfigurePage(reply: FastifyReply, configId?: string) {
+  const nonce = randomBytes(18).toString('base64');
+  void reply.header(
+    'content-security-policy',
+    `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+  );
+  return reply.type('text/html').send(configurePage(nonce, configId));
+}
+
+function buildRateLimiters(overrides: Partial<ServerRateLimiters> = {}): ServerRateLimiters {
+  return {
+    configuration:
+      overrides.configuration ??
+      createFixedWindowRateLimiter({ maximumAttempts: 30, windowMs: 60_000 }),
+    providerTest:
+      overrides.providerTest ??
+      createFixedWindowRateLimiter({ maximumAttempts: 10, windowMs: 60_000 }),
+    search:
+      overrides.search ?? createFixedWindowRateLimiter({ maximumAttempts: 60, windowMs: 60_000 }),
+    playback:
+      overrides.playback ?? createFixedWindowRateLimiter({ maximumAttempts: 60, windowMs: 60_000 }),
+  };
+}
+
+function consumeRateLimit(limiter: RateLimiter, key: string, reply: FastifyReply): boolean {
+  const decision = limiter.consume(key);
+  if (decision.allowed) return true;
+  void reply.header('retry-after', String(Math.max(1, Math.ceil(decision.retryAfterMs / 1_000))));
+  void reply.code(429).send({ error: 'Too many requests' });
+  return false;
 }
 
 function configuredId(value: unknown): string | undefined {

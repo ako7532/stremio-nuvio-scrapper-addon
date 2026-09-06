@@ -12,6 +12,11 @@ manifest URLs, and revocation. The server stream route accepts the aggregation u
 dependency injection; concrete metadata-source and per-user playback wiring remain separate from the
 configuration slice.
 
+Phase 9 hardening is in progress. The HTTP boundary applies a nonce-based content security policy to
+the configure page, disables caching for configuration responses, adds bounded in-memory request
+limits, and emits structured route-template logs without configuration IDs, play tokens, credentials,
+headers, or raw URLs.
+
 ## Requirements
 
 - Node.js 22 or newer

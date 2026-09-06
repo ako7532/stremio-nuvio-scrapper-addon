@@ -15,6 +15,7 @@ const store = createSqliteConfigurationStore(
 );
 const server = buildServer({
   logger: true,
+  logLevel: environment.LOG_LEVEL,
   configurationService: createConfigurationService(store),
   providerConnectionTester: testProviderConnection,
   publicBaseUrl: environment.ADDON_BASE_URL,

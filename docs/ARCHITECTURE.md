@@ -72,6 +72,18 @@ extensions remain out of scope.
 
 Provider credentials stay in encrypted server-side configuration storage and never appear in manifest, stream, play URLs, frontend state, or logs.
 
+The public HTTP boundary uses bounded fixed-window limiters for configuration mutations, provider
+connection tests, searches, and playback resolution. Configured searches are keyed by opaque
+configuration ID; unconfigured searches and other potentially expensive operations are keyed by the
+direct client address. These in-memory limits fit the documented single-instance self-hosted
+deployment and must move to shared state before a multi-instance deployment.
+
+Request logging deliberately disables Fastify's raw URL logging. Completion events contain only the
+request ID, method, route template, status, and duration, so dynamic configuration IDs and signed play
+tokens do not enter logs. The configure page receives a per-response CSP nonce and configuration API
+responses are marked `no-store`. Cross-origin access is enabled only for the Stremio protocol and
+playback routes, not for the configuration UI or its API.
+
 ## Configuration and persistence
 
 The configure page talks to a narrow application service rather than SQLite directly. Its repository

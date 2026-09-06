@@ -29,9 +29,15 @@ describe('configuration HTTP API', () => {
     expect(response.body).toContain('name="viewport"');
     expect(response.body).toContain('Test TorBox');
     expect(response.body).not.toContain('server-held-fixture-key');
-    const script = /<script>([\s\S]+)<\/script>/u.exec(response.body)?.[1];
+    const nonce = /<script nonce="([^"]+)">/u.exec(response.body)?.[1] ?? '';
+    const script = /<script nonce="[^"]+">([\s\S]+)<\/script>/u.exec(response.body)?.[1];
+    expect(nonce).not.toBe('');
     expect(script).toBeDefined();
     expect(() => new Script(script ?? '')).not.toThrow();
+    expect(response.headers['content-security-policy']).toContain("default-src 'none'");
+    expect(response.headers['content-security-policy']).toContain(`script-src 'nonce-${nonce}'`);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('creates, safely reads, updates, and revokes an opaque configuration', async () => {
