@@ -440,6 +440,64 @@ describe('SearchStreams', () => {
     ]);
   });
 
+  it('finds anime through a bounded localized and English title pair', async () => {
+    const metadataResolver: MetadataResolver = {
+      resolve: vi.fn().mockResolvedValue({
+        type: 'series',
+        id: 'tt13911284',
+        originalTitle: '地獄楽',
+        englishTitle: "Hell's Paradise",
+        czechTitle: 'Pekelný ráj',
+        slovakTitle: '地獄楽',
+        alternativeTitles: ['Jigokuraku', "Hell's Paradise: Jigokuraku"],
+        season: 2,
+        episode: 9,
+      }),
+    };
+    const result = animeWebshareResult();
+    const search = vi
+      .fn<StreamProvider['search']>()
+      .mockImplementation((query) =>
+        Promise.resolve(query.value === "Hell's Paradise S02E09" ? [result] : []),
+      );
+    const provider: StreamProvider = {
+      name: 'webshare',
+      capabilities: {
+        search: true,
+        source: 'file-hosting',
+        requiresAuthentication: true,
+        supportsDirectStreaming: true,
+        supportsCacheLookup: false,
+      },
+      search,
+    };
+    const searchStreams = createSearchStreams({
+      metadataResolver,
+      providers: [provider],
+      configuration: {
+        ...configuration,
+        providers: {
+          sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
+          webshare: { enabled: true },
+        },
+      },
+      websharePlaybackUrl: () => 'https://addon.example/play/opaque-token',
+      caching: false,
+      providerExecutionPolicy: false,
+    });
+
+    const streams = await searchStreams.search(
+      { type: 'series', id: 'tt13911284', season: 2, episode: 9 },
+      { signal: new AbortController().signal, correlationId: 'anime-title-selection' },
+    );
+
+    expect(search.mock.calls.map(([query]) => query.value)).toEqual([
+      'Pekelný ráj S02E09',
+      "Hell's Paradise S02E09",
+    ]);
+    expect(streams).toHaveLength(1);
+  });
+
   it('uses a bounded title-only series fallback after exact and season searches are empty', async () => {
     const metadataResolver: MetadataResolver = {
       resolve: vi.fn().mockResolvedValue({
@@ -532,6 +590,25 @@ function webshareResult(): FileProviderResult {
     mediaType: 'movie',
     sizeBytes: 2_000_000_000,
     providerUrl: 'https://webshare.cz/#/file/5m56ZO4cb6',
+    parsed: parseRelease(filename),
+    available: true,
+    streamable: true,
+  };
+}
+
+function animeWebshareResult(): FileProviderResult {
+  const filename = 'Hell.s.Paradise.S02E09.1080p.WEB-DL.EN.HEVC.mkv';
+  return {
+    provider: 'webshare',
+    source: 'file-hosting',
+    id: 'sanitized-anime-file',
+    fileId: 'sanitized-anime-file',
+    title: filename,
+    releaseName: filename,
+    filename,
+    mediaType: 'series',
+    sizeBytes: 2_000_000_000,
+    providerUrl: 'https://webshare.cz/sanitized-anime-file',
     parsed: parseRelease(filename),
     available: true,
     streamable: true,

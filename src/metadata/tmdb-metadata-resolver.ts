@@ -25,19 +25,21 @@ export const createTmdbMetadataSource = (client: TmdbClient): MetadataSource => 
       client.getLocalizedTitle(request.type, found.id, 'cs-CZ', context.signal),
       client.getAlternativeTitles(request.type, found.id, context.signal),
     ]);
+    const allowedAlternativeTitles = alternativeTitles.filter(
+      ({ country }) => country === undefined || ['SK', 'CZ', 'US', 'GB', 'JP'].includes(country),
+    );
     const alternatives = uniqueTitles(
       [
         found.title,
-        ...alternativeTitles
-          .filter(
-            ({ country }) => country === undefined || ['SK', 'CZ', 'US', 'GB'].includes(country),
-          )
+        ...allowedAlternativeTitles
+          .filter(({ country, title }) => country === 'JP' && /\p{Script=Latin}/u.test(title))
           .map(({ title }) => title),
+        ...allowedAlternativeTitles.map(({ title }) => title),
       ],
       found.originalTitle,
       slovakTitle,
       czechTitle,
-    );
+    ).slice(0, MAXIMUM_ALTERNATIVE_TITLES);
     return {
       ...request,
       originalTitle: found.originalTitle,
@@ -49,6 +51,8 @@ export const createTmdbMetadataSource = (client: TmdbClient): MetadataSource => 
     };
   },
 });
+
+const MAXIMUM_ALTERNATIVE_TITLES = 8;
 
 const uniqueTitles = (
   values: readonly string[],

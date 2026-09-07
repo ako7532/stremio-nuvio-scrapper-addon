@@ -47,6 +47,33 @@ describe('episode matcher', () => {
     ).toMatchObject({ matched: true, kind: 'single-episode' });
   });
 
+  it.each([
+    'Hells.Paradise.S02E09.1080p.WEB-DL',
+    'Hell.s.Paradise.S02E09.1080p.WEB-DL',
+    'Jigokuraku.S02E09.1080p.WEB-DL',
+    'Hell.s.Paradise.Jigokuraku.S02E09.1080p.WEB-DL',
+  ])('accepts strict English and romanized anime aliases: %s', (releaseName) => {
+    expect(
+      matchEpisode(
+        {
+          type: 'series',
+          id: 'tt13911284',
+          originalTitle: '地獄楽',
+          englishTitle: "Hell's Paradise",
+          czechTitle: 'Pekelný ráj',
+          alternativeTitles: ['Jigokuraku', "Hell's Paradise: Jigokuraku"],
+          season: 2,
+          episode: 9,
+        },
+        { mediaType: 'series', title: releaseName, releaseName },
+      ),
+    ).toMatchObject({ matched: true, kind: 'single-episode' });
+  });
+
+  it('does not treat a bare absolute anime episode number as episode coverage', () => {
+    expect(parseEpisodeCoverage('Jigokuraku - 22 (1080p)')).toBeUndefined();
+  });
+
   it('rejects another episode and another season', () => {
     expect(
       matchEpisode(metadata, {

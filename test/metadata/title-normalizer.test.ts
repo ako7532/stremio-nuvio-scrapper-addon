@@ -15,4 +15,9 @@ describe('title normalization', () => {
     expect(titleTokens('Spider-Man: No Way Home')).toEqual(['spider', 'man', 'no', 'way', 'home']);
     expect(titleTokens('')).toEqual([]);
   });
+
+  it('normalizes apostrophe-free and possessive spellings consistently', () => {
+    expect(normalizeTitle("Hell's Paradise")).toBe('hells paradise');
+    expect(normalizeTitle('Hells Paradise')).toBe('hells paradise');
+  });
 });

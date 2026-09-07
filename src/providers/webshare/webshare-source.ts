@@ -28,9 +28,25 @@ export const createWebshareSource = (
       const candidates = results
         .filter((result) => !result.passwordProtected)
         .slice(0, maximumResults);
-      return mapWithConcurrency(candidates, detailConcurrency, (result) =>
-        enrichResult(api, result, signal),
+      const settlements = await mapWithConcurrency(
+        candidates,
+        detailConcurrency,
+        async (result) => {
+          try {
+            return { status: 'fulfilled' as const, value: await enrichResult(api, result, signal) };
+          } catch (reason) {
+            signal?.throwIfAborted();
+            return { status: 'rejected' as const, reason };
+          }
+        },
       );
+      const files = settlements.flatMap((settlement) =>
+        settlement.status === 'fulfilled' ? [settlement.value] : [],
+      );
+      if (files.length > 0 || settlements.length === 0) return files;
+      const failure = settlements.find((settlement) => settlement.status === 'rejected');
+      if (failure === undefined) return [];
+      throw failure.reason;
     },
     async resolvePlayback(fileId, signal) {
       const id = normalizeWebshareFileId(fileId);

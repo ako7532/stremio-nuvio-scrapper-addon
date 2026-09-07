@@ -103,4 +103,38 @@ describe('Webshare source', () => {
     expect(getFileInfo).toHaveBeenCalledTimes(3);
     expect(maximumActive).toBeLessThanOrEqual(2);
   });
+
+  it('keeps valid files when one result fails metadata enrichment', async () => {
+    const { api, search, getFileInfo } = apiStub();
+    search.mockResolvedValue([file(1), file(2)]);
+    getFileInfo.mockImplementation((id) => {
+      if (id === file(2).id) return Promise.reject(new Error('stale file metadata'));
+      return Promise.resolve({
+        ...file(1),
+        available: true,
+        removed: false,
+        copyrighted: false,
+      });
+    });
+    const source = createWebshareSource(api, {
+      getSessionToken: vi.fn().mockResolvedValue('session-token'),
+    });
+
+    await expect(source.search('Oshi no Ko S03E01')).resolves.toEqual([
+      expect.objectContaining({ id: file(1).id }),
+    ]);
+    expect(getFileInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it('still reports provider failure when every result fails enrichment', async () => {
+    const { api, search, getFileInfo } = apiStub();
+    const failure = new Error('metadata unavailable');
+    search.mockResolvedValue([file(1), file(2)]);
+    getFileInfo.mockRejectedValue(failure);
+    const source = createWebshareSource(api, {
+      getSessionToken: vi.fn().mockResolvedValue('session-token'),
+    });
+
+    await expect(source.search('Oshi no Ko S03E01')).rejects.toBe(failure);
+  });
 });

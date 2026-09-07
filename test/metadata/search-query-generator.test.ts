@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { generateSearchQueries } from '../../src/metadata/search-query-generator.js';
+import { normalizeTitle } from '../../src/metadata/title-normalizer.js';
 
 describe('search query generation', () => {
   it('prioritizes localized movie titles and adds diacritic-free variants', () => {
@@ -99,5 +100,30 @@ describe('search query generation', () => {
 
     expect(queries.map(({ value }) => value)).toEqual(['Dark S02E03', 'Dark S2E3', 'Dark 2x03']);
     expect(queries.every((query) => query.type === 'series' && !query.seasonPack)).toBe(true);
+  });
+
+  it('places one localized and one English or romanized anime title first', () => {
+    const queries = generateSearchQueries({
+      type: 'series',
+      id: 'tt13911284',
+      originalTitle: '地獄楽',
+      englishTitle: "Hell's Paradise",
+      czechTitle: 'Pekelný ráj',
+      slovakTitle: '地獄楽',
+      alternativeTitles: ['Jigokuraku', "Hell's Paradise: Jigokuraku"],
+      season: 2,
+      episode: 9,
+    });
+
+    const firstQueryByTitle = queries.filter(
+      (query, index, values) =>
+        values.findIndex(({ title }) => normalizeTitle(title) === normalizeTitle(query.title)) ===
+        index,
+    );
+    expect(firstQueryByTitle.slice(0, 2).map(({ value }) => value)).toEqual([
+      'Pekelný ráj S02E09',
+      "Hell's Paradise S02E09",
+    ]);
+    expect(queries.some(({ value }) => value === 'Jigokuraku S02E09')).toBe(true);
   });
 });

@@ -9,11 +9,18 @@ export function generateSearchQueries(
   metadata: MediaMetadata,
   options: SearchQueryOptions = {},
 ): readonly SearchQuery[] {
-  const primaryTitles = uniqueTitles([
-    metadata.czechTitle,
-    metadata.slovakTitle,
-    metadata.originalTitle,
+  const localizedTitles = uniqueTitles([metadata.czechTitle, metadata.slovakTitle]);
+  const internationalTitles = uniqueTitles([
     metadata.englishTitle,
+    ...(isProviderFriendlyTitle(metadata.originalTitle) ? [metadata.originalTitle] : []),
+    ...metadata.alternativeTitles.filter(isProviderFriendlyTitle),
+    metadata.originalTitle,
+  ]);
+  const primaryTitles = uniqueTitles([
+    localizedTitles[0],
+    internationalTitles[0],
+    ...localizedTitles.slice(1),
+    ...internationalTitles.slice(1),
   ]);
   const titles = uniqueTitles([...primaryTitles, ...metadata.alternativeTitles]);
   const queries: SearchQuery[] = [];
@@ -123,6 +130,10 @@ function uniqueTitles(values: readonly (string | undefined)[]): readonly string[
   }
 
   return titles;
+}
+
+function isProviderFriendlyTitle(value: string): boolean {
+  return /\p{Script=Latin}/u.test(value);
 }
 
 function titleVariants(title: string): readonly string[] {

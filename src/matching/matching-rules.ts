@@ -76,8 +76,14 @@ function uniqueExpectedTitles(metadata: MediaMetadata): readonly string[] {
     ...metadata.alternativeTitles,
   ]
     .filter((value): value is string => value !== undefined)
-    .map(normalizeTitle)
+    .flatMap(titleMatchVariants)
     .filter((value, index, values) => value !== '' && values.indexOf(value) === index);
+}
+
+function titleMatchVariants(value: string): readonly string[] {
+  const normalized = normalizeTitle(value);
+  if (!/[’']/u.test(value)) return [normalized];
+  return [normalized, normalizeTitle(value.replace(/[’']/gu, ' '))];
 }
 
 function releaseStartsWithTitle(releaseName: string, expectedTitle: string): boolean {

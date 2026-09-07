@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTmdbClient } from '../../src/metadata/tmdb-client.js';
+import { createTmdbClient, type TmdbClient } from '../../src/metadata/tmdb-client.js';
 import { createTmdbMetadataSource } from '../../src/metadata/tmdb-metadata-resolver.js';
 
 const fixture = (name: string) =>
@@ -67,9 +67,47 @@ describe('TMDB metadata source', () => {
       expect(metadata).toMatchObject(expected);
       expect(metadata?.slovakTitle).toBeTruthy();
       expect(metadata?.czechTitle).toBeTruthy();
-      expect(metadata?.alternativeTitles).toHaveLength(3);
-      expect(metadata?.alternativeTitles).not.toContain('Sanitized Japanese title');
+      expect(metadata?.alternativeTitles.length).toBeLessThanOrEqual(8);
+      if (request.type === 'movie') {
+        expect(metadata?.alternativeTitles).toContain('Sanitized Japanese title');
+      }
       expect(fetchMock).toHaveBeenCalledTimes(4);
     },
   );
+
+  it('keeps a romanized JP alias inside the bounded alternative title list', async () => {
+    const client: TmdbClient = {
+      validateAuthentication: vi.fn().mockResolvedValue(undefined),
+      findByImdbId: vi.fn().mockResolvedValue({
+        id: 117465,
+        originalTitle: '地獄楽',
+        title: "Hell's Paradise",
+        year: 2023,
+      }),
+      findByTvdbId: vi.fn().mockResolvedValue(undefined),
+      getById: vi.fn(),
+      getLocalizedTitle: vi
+        .fn()
+        .mockResolvedValueOnce('地獄楽')
+        .mockResolvedValueOnce('Pekelný ráj'),
+      getAlternativeTitles: vi.fn().mockResolvedValue([
+        ...Array.from({ length: 10 }, (_, index) => ({
+          country: 'US',
+          title: `English alternative ${String(index + 1)}`,
+        })),
+        { country: 'JP', title: 'Jigokuraku' },
+        { country: 'CN', title: '地狱乐' },
+      ]),
+    };
+    const source = createTmdbMetadataSource(client);
+
+    const metadata = await source.lookup(
+      { type: 'series', id: 'tt13911284', season: 2, episode: 9 },
+      { signal: new AbortController().signal, correlationId: 'anime-metadata' },
+    );
+
+    expect(metadata?.alternativeTitles).toContain('Jigokuraku');
+    expect(metadata?.alternativeTitles).toHaveLength(8);
+    expect(metadata?.alternativeTitles).not.toContain('地狱乐');
+  });
 });
