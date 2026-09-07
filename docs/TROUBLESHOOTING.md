@@ -21,9 +21,24 @@ of adding secrets or complete environment dumps to logs.
 ## No streams are returned
 
 Confirm the user has a valid TMDB token and credentials for every enabled provider, then check provider
-toggles, hard filters, language mode, and playback mode. Webshare also requires a deployment-level exact
-`WEBSHARE_PLAYBACK_HOSTS` allowlist; without it, Webshare results are deliberately hidden. One provider
-failure should not discard successful results from another provider.
+toggles, hard filters, language mode, and playback mode. One provider failure should not discard
+successful results from another provider.
+
+For one affected configuration, enable **Advanced -> Enable safe search debug logs**, save it, and
+repeat the failing movie or episode request. Events with the same `correlationId` show resolved titles,
+the precise/season/broad queries, provider counts and timings, aggregate matcher/filter rejection
+reasons, TorBox cache-state counts, playback exclusions, and the final stream count. Disable the option
+after diagnosis to reduce log volume. These events never include credentials, configuration IDs,
+provider result IDs or hashes, magnet links, or playback URLs.
+
+## An uncached TorBox stream does not start immediately
+
+The source list does not contact TorBox, so cache state is decided only after the playback click. If
+adding uncached torrents is disabled, a non-cached selection is rejected without adding it. If enabled,
+the first real `GET /play/...` adds the torrent to the user's TorBox account. While TorBox reports that the download is not both finished and present, the
+addon redirects to a short local status video instead of waiting indefinitely. Open the same stream
+again after TorBox finishes; pending resolutions are deliberately not cached, so every retry checks the
+current state. `HEAD` remains read-only and never adds a torrent.
 
 ## Rate limits identify the wrong client
 

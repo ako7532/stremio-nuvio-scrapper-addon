@@ -13,7 +13,7 @@ type Rule<T> = readonly [value: T, pattern: RegExp];
 const resolutionRules: readonly Rule<Resolution>[] = [
   ['2160p', /\b(?:2160p?|4k|uhd)\b/iu],
   ['1440p', /\b1440p?\b/iu],
-  ['1080p', /\b1080[pi]?\b/iu],
+  ['1080p', /\b(?:1080[pi]?|full[ ._-]?hd|fhd)\b/iu],
   ['720p', /\b720[pi]?\b/iu],
   ['576p', /\b576[pi]?\b/iu],
   ['480p', /\b480[pi]?\b/iu],

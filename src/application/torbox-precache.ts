@@ -6,11 +6,14 @@ import type {
 import type { TorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import { TorboxTransportError } from '../providers/torbox/torbox-api-client.js';
 import type { TorboxTorrent } from '../providers/torbox/torbox-types.js';
+import type { TorrentFileStore } from './torrent-file-store.js';
+import { observeSearch, type SearchObserver } from './search-observability.js';
 
 export type TorboxPrecacheRequest = {
   reference: PlaybackReference;
   client: TorboxApiClient;
   accountTorrents: readonly TorboxTorrent[];
+  torrentFiles?: TorrentFileStore;
 };
 
 export type TorboxPrecacheScheduler = {
@@ -24,6 +27,7 @@ export type TorboxPrecacheOptions = {
   maximumBackoffMs?: number;
   maximumTrackedEntries?: number;
   clock?: () => number;
+  observer?: SearchObserver;
 };
 
 type UserState = {
@@ -94,6 +98,7 @@ export const createTorboxPrecacheScheduler = (
           completedHashes,
           inFlightHashes,
           userStates,
+          observer: options.observer,
         }),
       )
       .catch(() => undefined);
@@ -117,6 +122,7 @@ type Runtime = {
   completedHashes: Map<string, number>;
   inFlightHashes: Set<string>;
   userStates: Map<string, UserState>;
+  observer: SearchObserver | undefined;
 };
 
 const runPrecache = async (request: TorboxPrecacheRequest, runtime: Runtime): Promise<void> => {
@@ -130,6 +136,15 @@ const runPrecache = async (request: TorboxPrecacheRequest, runtime: Runtime): Pr
     reference.precachePolicy,
     accountHashes,
   );
+  if (reference.safeDebug === true) {
+    observeSearch(runtime.observer, {
+      type: 'torbox-precache-stage',
+      stage: 'selection',
+      outcome: 'complete',
+      durationMs: 0,
+      candidateCount: candidates.length,
+    });
+  }
 
   for (const candidate of candidates) {
     const now = runtime.clock();
@@ -144,11 +159,45 @@ const runPrecache = async (request: TorboxPrecacheRequest, runtime: Runtime): Pr
 
     runtime.inFlightHashes.add(key);
     state.creates += 1;
+    const startedAt = runtime.clock();
     try {
-      await request.client.createTorrent(magnetUri);
+      const torrentFile = request.torrentFiles?.get(reference.configId, hash);
+      if (torrentFile !== undefined && request.client.createTorrentFile !== undefined) {
+        await request.client.createTorrentFile(torrentFile);
+      } else {
+        await request.client.createTorrent(magnetUri);
+      }
       state.failureCount = 0;
+      if (reference.safeDebug === true) {
+        observeSearch(runtime.observer, {
+          type: 'torbox-precache-stage',
+          stage: 'create-torrent',
+          outcome: 'complete',
+          durationMs: Math.max(0, runtime.clock() - startedAt),
+          ...(candidate.result.season === undefined ? {} : { season: candidate.result.season }),
+          ...(candidate.result.episode === undefined ? {} : { episode: candidate.result.episode }),
+        });
+      }
       setBounded(runtime.completedHashes, key, reference.expiresAt, runtime.maximumTrackedEntries);
     } catch (error) {
+      if (reference.safeDebug === true) {
+        observeSearch(runtime.observer, {
+          type: 'torbox-precache-stage',
+          stage: 'create-torrent',
+          outcome: 'failed',
+          durationMs: Math.max(0, runtime.clock() - startedAt),
+          ...(candidate.result.season === undefined ? {} : { season: candidate.result.season }),
+          ...(candidate.result.episode === undefined ? {} : { episode: candidate.result.episode }),
+          category: error instanceof TorboxTransportError ? error.kind : 'unexpected',
+          ...(error instanceof TorboxTransportError && error.statusCode !== undefined
+            ? { statusCode: error.statusCode }
+            : {}),
+          ...(error instanceof TorboxTransportError && error.errorCode !== undefined
+            ? { errorCode: error.errorCode }
+            : {}),
+        });
+      }
+      if (isCandidateRejection(error)) continue;
       applyBackoff(state, error, now, runtime);
       break;
     } finally {
@@ -156,6 +205,13 @@ const runPrecache = async (request: TorboxPrecacheRequest, runtime: Runtime): Pr
     }
   }
 };
+
+const isCandidateRejection = (error: unknown): boolean =>
+  error instanceof TorboxTransportError &&
+  error.kind !== 'authentication-failed' &&
+  error.kind !== 'rate-limited' &&
+  ((error.statusCode !== undefined && error.statusCode >= 400 && error.statusCode < 500) ||
+    error.errorCode === 'DOWNLOAD_SERVER_ERROR');
 
 export const selectPrecacheCandidates = (
   candidates: readonly PrecacheCandidate[],
@@ -170,7 +226,7 @@ export const selectPrecacheCandidates = (
     if (selected.length >= policy.count) break;
     const { result } = candidate;
     const hash = result.infoHash.toLocaleLowerCase('en');
-    if (seen.has(hash) || result.cacheStatus !== 'uncached' || result.magnetUri === undefined)
+    if (seen.has(hash) || result.cacheStatus === 'unknown' || result.magnetUri === undefined)
       continue;
     if (candidate.matchScore < policy.minimumMatchScore) continue;
     if ((result.seeders ?? 0) < policy.minimumSeeders) continue;

@@ -1,5 +1,6 @@
 import type { SearchQuery } from '../../domain/media.js';
 import type { TorrentProviderResult } from '../../domain/release.js';
+import { releaseCoversSeason } from '../../matching/episode-matcher.js';
 import { parseRelease } from '../../release/release-parser.js';
 import type { ProviderCapabilities, ProviderSearchContext, StreamProvider } from '../provider.js';
 import {
@@ -9,11 +10,13 @@ import {
 import type { SktorrentSource } from './sktorrent-source.js';
 import { parseSktorrentTorrent } from './sktorrent-torrent-parser.js';
 import type { SktorrentListingResult } from './sktorrent-types.js';
+import type { TorrentFileStore } from '../../application/torrent-file-store.js';
 
 export type SktorrentProviderOptions = {
   maximumDetails?: number;
   detailConcurrency?: number;
   detailCache?: false | SktorrentSourceCacheOptions;
+  torrentFiles?: { store: TorrentFileStore; namespace: string };
 };
 
 const capabilities: ProviderCapabilities = {
@@ -28,8 +31,8 @@ export const createSktorrentProvider = (
   source: SktorrentSource,
   options: SktorrentProviderOptions = {},
 ): StreamProvider => {
-  const maximumDetails = positiveInteger(options.maximumDetails ?? 12, 'maximum details');
-  const detailConcurrency = positiveInteger(options.detailConcurrency ?? 3, 'detail concurrency');
+  const maximumDetails = positiveInteger(options.maximumDetails ?? 10, 'maximum details');
+  const detailConcurrency = positiveInteger(options.detailConcurrency ?? 5, 'detail concurrency');
   const providerSource =
     options.detailCache === false
       ? source
@@ -39,15 +42,75 @@ export const createSktorrentProvider = (
     name: 'sktorrent',
     capabilities,
     async search(query, context) {
-      const listings = (await providerSource.search(query.value, context.signal)).slice(
-        0,
-        maximumDetails,
+      const [listingResults] = await Promise.all([
+        providerSource.search(query.value, context.signal),
+        providerSource.validateAuthentication?.(context.signal) ?? Promise.resolve(),
+      ]);
+      const relevantListings =
+        query.type === 'series' && query.broad === true
+          ? preferMatchingSeasonListings(listingResults, query.season)
+          : listingResults;
+      const listings = selectDiverseListings(relevantListings, maximumDetails);
+      const settlements = await mapWithConcurrency(listings, detailConcurrency, async (listing) => {
+        try {
+          return {
+            status: 'fulfilled' as const,
+            value: await normalizeListing(
+              providerSource,
+              listing,
+              query,
+              context,
+              options.torrentFiles,
+            ),
+          };
+        } catch (reason) {
+          context.signal.throwIfAborted();
+          return { status: 'rejected' as const, reason };
+        }
+      });
+      const results = settlements.flatMap((settlement) =>
+        settlement.status === 'fulfilled' ? [settlement.value] : [],
       );
-      return mapWithConcurrency(listings, detailConcurrency, (listing) =>
-        normalizeListing(providerSource, listing, query, context),
-      );
+      if (results.length > 0 || settlements.length === 0) return results;
+      const failure = settlements.find((settlement) => settlement.status === 'rejected');
+      if (failure === undefined) return [];
+      throw failure.reason;
     },
   };
+};
+
+const preferMatchingSeasonListings = (
+  listings: readonly SktorrentListingResult[],
+  season: number,
+): readonly SktorrentListingResult[] => {
+  const matching = listings.filter((listing) => releaseCoversSeason(listing.title, season));
+  return matching.length > 0 ? matching : listings;
+};
+
+const selectDiverseListings = (
+  listings: readonly SktorrentListingResult[],
+  maximum: number,
+): readonly SktorrentListingResult[] => {
+  const groups = new Map<string, SktorrentListingResult[]>();
+  for (const listing of listings) {
+    const resolution = parseRelease(listing.title).resolution;
+    const group = groups.get(resolution) ?? [];
+    group.push(listing);
+    groups.set(resolution, group);
+  }
+  const selected: SktorrentListingResult[] = [];
+  for (let offset = 0; selected.length < maximum; offset += 1) {
+    let found = false;
+    for (const group of groups.values()) {
+      const listing = group[offset];
+      if (listing === undefined) continue;
+      selected.push(listing);
+      found = true;
+      if (selected.length === maximum) break;
+    }
+    if (!found) break;
+  }
+  return selected;
 };
 
 const normalizeListing = async (
@@ -55,12 +118,13 @@ const normalizeListing = async (
   listing: SktorrentListingResult,
   query: SearchQuery,
   context: ProviderSearchContext,
+  torrentFiles: SktorrentProviderOptions['torrentFiles'],
 ): Promise<TorrentProviderResult> => {
   const detail = await source.getDetail(listing, context.signal);
-  const torrent = parseSktorrentTorrent(
-    await source.downloadTorrent(detail, context.signal),
-    detail.id,
-  );
+  const torrentFile = await source.downloadTorrent(detail, context.signal);
+  const torrent = parseSktorrentTorrent(torrentFile, detail.id);
+  context.signal.throwIfAborted();
+  torrentFiles?.store.put(torrentFiles.namespace, torrent.infoHash, torrentFile);
   const parsed = parseRelease(
     detail.title,
     ...detail.files.map((file) => file.name),
@@ -77,6 +141,12 @@ const normalizeListing = async (
     title: detail.title,
     releaseName: detail.title,
     mediaType: query.type,
+    ...(query.type === 'series'
+      ? {
+          season: query.season,
+          ...(query.episode === undefined ? {} : { episode: query.episode }),
+        }
+      : {}),
     ...(filename === undefined ? {} : { filename }),
     sizeBytes: detail.sizeBytes,
     seeders: detail.seeders,

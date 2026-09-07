@@ -25,5 +25,66 @@ describe('search logger', () => {
       'provider search failed',
     );
     expect(info).not.toHaveBeenCalled();
+
+    observe({
+      type: 'provider-stage-complete',
+      provider: 'sktorrent',
+      stage: 'precise',
+      queries: ['Mafstory S01E01'],
+      durationMs: 123,
+      rawResultCount: 0,
+      failureCount: 0,
+      correlationId: 'request-2',
+    });
+
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'provider-stage-complete',
+        queries: ['Mafstory S01E01'],
+      }),
+      'safe search debug',
+    );
+
+    observe({
+      type: 'torbox-playback-stage',
+      stage: 'create-torrent',
+      outcome: 'failed',
+      durationMs: 321,
+      category: 'invalid-response',
+      statusCode: 422,
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      {
+        type: 'torbox-playback-stage',
+        stage: 'create-torrent',
+        outcome: 'failed',
+        durationMs: 321,
+        category: 'invalid-response',
+        statusCode: 422,
+      },
+      'torbox playback stage failed',
+    );
+
+    observe({
+      type: 'torbox-precache-stage',
+      stage: 'create-torrent',
+      outcome: 'complete',
+      durationMs: 456,
+      season: 17,
+      episode: 2,
+    });
+
+    expect(info).toHaveBeenCalledWith(
+      {
+        type: 'torbox-precache-stage',
+        stage: 'create-torrent',
+        outcome: 'complete',
+        durationMs: 456,
+        season: 17,
+        episode: 2,
+      },
+      'safe precache debug',
+    );
   });
 });

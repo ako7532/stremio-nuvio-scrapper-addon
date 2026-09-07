@@ -8,7 +8,13 @@ export const createTmdbMetadataSource = (client: TmdbClient): MetadataSource => 
   async lookup(request, context): Promise<MediaMetadata | undefined> {
     let found;
     try {
-      found = await client.findByImdbId(request, context.signal);
+      const tmdbId = /^tmdb:(\d{1,10})$/u.exec(request.id)?.[1];
+      found =
+        tmdbId !== undefined
+          ? await client.getById(request.type, Number(tmdbId), context.signal)
+          : /^tvdb[:-]\d{1,10}$/u.test(request.id)
+            ? await client.findByTvdbId(request, context.signal)
+            : await client.findByImdbId(request, context.signal);
     } catch (error) {
       if (error instanceof TmdbTransportError && error.kind === 'not-found') return undefined;
       throw error;

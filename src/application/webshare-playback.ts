@@ -37,7 +37,6 @@ export const createWebsharePlaybackAssembly = (options: {
   baseUrl: string;
   tokens: PlayTokenService;
   credentials: WebshareCredentialStore;
-  allowedPlaybackHosts: readonly string[];
   timeoutMs?: number;
   referenceTtlMs?: number;
   resolutionTtlMs?: number;
@@ -50,10 +49,6 @@ export const createWebsharePlaybackAssembly = (options: {
   ) => Promise<string>;
 }): WebsharePlaybackAssembly => {
   const baseUrl = validateBaseUrl(options.baseUrl);
-  const allowedHosts = options.allowedPlaybackHosts.map(normalizeHost);
-  if (allowedHosts.length === 0) {
-    throw new TypeError('Webshare playback requires an explicit host allowlist');
-  }
   const referenceTtlMs = positiveInteger(options.referenceTtlMs ?? 5 * 60_000, 'reference TTL');
   const resolutionTtlMs = positiveInteger(options.resolutionTtlMs ?? 30_000, 'resolution TTL');
   const maximumReferences = positiveInteger(
@@ -143,7 +138,6 @@ export const createWebsharePlaybackAssembly = (options: {
               validated.reference.fileId,
               signal,
             ),
-            allowedHosts,
           );
           return { url, filename: validated.reference.fileId };
         })();
@@ -180,7 +174,7 @@ const referenceMatches = (reference: WebshareReference, claims: WebshareClaims):
       (reference.media.type === 'movie' ||
         (reference.media.season === claims.season && reference.media.episode === claims.episode))));
 
-const validatePlaybackUrl = (value: string, allowedHosts: readonly string[]): string => {
+const validatePlaybackUrl = (value: string): string => {
   let url: URL;
   try {
     url = new URL(value);
@@ -189,12 +183,7 @@ const validatePlaybackUrl = (value: string, allowedHosts: readonly string[]): st
       cause: error,
     });
   }
-  if (
-    url.protocol !== 'https:' ||
-    url.username.length > 0 ||
-    url.password.length > 0 ||
-    !allowedHosts.includes(url.hostname.toLowerCase())
-  ) {
+  if (url.protocol !== 'https:' || url.username.length > 0 || url.password.length > 0) {
     throw new PlaybackResolveError('invalid-provider-url', 'Webshare returned a disallowed URL');
   }
   return url.toString();
@@ -214,18 +203,6 @@ const validateBaseUrl = (value: string): URL => {
   }
   if (!url.pathname.endsWith('/')) url.pathname += '/';
   return url;
-};
-
-const normalizeHost = (value: string): string => {
-  const host = value.trim().toLowerCase();
-  if (
-    !/^(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?)(?:\.(?:[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?))+$/u.test(
-      host,
-    )
-  ) {
-    throw new TypeError('Invalid Webshare playback host');
-  }
-  return host;
 };
 
 const opaqueId = (value: string, name: string): string => {

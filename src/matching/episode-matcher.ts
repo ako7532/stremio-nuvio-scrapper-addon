@@ -10,6 +10,7 @@ export type EpisodeMatchDecision = MatchDecision & {
 
 type EpisodeCoverage = {
   season: number;
+  endSeason?: number;
   episodes: ReadonlySet<number>;
   kind: Exclude<EpisodeReleaseKind, 'none'>;
 };
@@ -36,7 +37,7 @@ export function matchEpisode(
   if (coverage === undefined) {
     return unmatched('episode marker missing');
   }
-  if (coverage.season !== metadata.season) {
+  if (!coverageIncludesSeason(coverage, metadata.season)) {
     return unmatched('season mismatch');
   }
   if (coverage.kind !== 'season-pack' && !coverage.episodes.has(metadata.episode)) {
@@ -85,13 +86,51 @@ export function parseEpisodeCoverage(value: string): EpisodeCoverage | undefined
     };
   }
 
+  const localized = normalized.normalize('NFKD').replace(/\p{M}+/gu, '');
+  const seasonRange = [
+    /\bS(\d{1,2})\s*\p{Pd}\s*S?(\d{1,2})\b/iu,
+    /\bSeasons?\s*(\d{1,2})\s*\p{Pd}\s*(\d{1,2})\b/iu,
+    /\b(\d{1,2})\s*\p{Pd}\s*(\d{1,2})\s*seri[ae]\b/iu,
+    /\bseri[ae]\s*(\d{1,2})\s*\p{Pd}\s*(\d{1,2})\b/iu,
+  ]
+    .map((pattern) => pattern.exec(localized))
+    .find((match) => match !== null);
+  if (seasonRange !== undefined) {
+    const first = Number(seasonRange[1]);
+    const second = Number(seasonRange[2]);
+    return {
+      season: Math.min(first, second),
+      endSeason: Math.max(first, second),
+      episodes: new Set(),
+      kind: 'season-pack',
+    };
+  }
+
   const seasonPack = /\b(?:S|Season\s*)(\d{1,2})\b/iu.exec(normalized);
   if (seasonPack !== null) {
     return { season: Number(seasonPack[1]), episodes: new Set(), kind: 'season-pack' };
   }
 
+  const localizedSeasonPack =
+    /\b(\d{1,2})\s*seri[ae]\b/iu.exec(localized) ?? /\bseri[ae]\s*(\d{1,2})\b/iu.exec(localized);
+  if (localizedSeasonPack !== null) {
+    return {
+      season: Number(localizedSeasonPack[1]),
+      episodes: new Set(),
+      kind: 'season-pack',
+    };
+  }
+
   return undefined;
 }
+
+export function releaseCoversSeason(value: string, season: number): boolean {
+  const coverage = parseEpisodeCoverage(value);
+  return coverage !== undefined && coverageIncludesSeason(coverage, season);
+}
+
+const coverageIncludesSeason = (coverage: EpisodeCoverage, season: number): boolean =>
+  season >= coverage.season && season <= (coverage.endSeason ?? coverage.season);
 
 function coverageFromCandidate(candidate: MatchCandidate): EpisodeCoverage | undefined {
   if (candidate.season !== undefined && candidate.episode !== undefined) {

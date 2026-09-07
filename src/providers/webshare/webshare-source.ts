@@ -23,7 +23,8 @@ export const createWebshareSource = (
 
   return {
     async search(query, signal) {
-      const results = await api.search(query, maximumResults, signal);
+      const token = await credentials.getSessionToken(signal);
+      const results = await api.search(query, maximumResults, token, signal);
       const candidates = results
         .filter((result) => !result.passwordProtected)
         .slice(0, maximumResults);

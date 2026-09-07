@@ -5,7 +5,7 @@ export const manifest = {
   description: 'Configurable CZ/SK stream results from independent providers.',
   resources: ['stream'],
   types: ['movie', 'series'],
-  idPrefixes: ['tt'],
+  idPrefixes: ['tt', 'tmdb:', 'tvdb:', 'tvdb-'],
   behaviorHints: {
     configurable: true,
     configurationRequired: true,

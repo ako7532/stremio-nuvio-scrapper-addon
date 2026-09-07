@@ -35,9 +35,9 @@ const apiStub = () => {
 };
 
 describe('Webshare source', () => {
-  it('combines public metadata and availability without authenticating during search', async () => {
-    const { api } = apiStub();
-    const getSessionToken = vi.fn();
+  it('uses the server-held session token for search and combines metadata with availability', async () => {
+    const { api, search } = apiStub();
+    const getSessionToken = vi.fn().mockResolvedValue('session-token');
     const credentials: WebshareCredentialService = { getSessionToken };
     const source = createWebshareSource(api, credentials);
 
@@ -49,13 +49,16 @@ describe('Webshare source', () => {
         providerUrl: 'https://webshare.cz/#/file/A000000001',
       }),
     ]);
-    expect(getSessionToken).not.toHaveBeenCalled();
+    expect(getSessionToken).toHaveBeenCalledOnce();
+    expect(search).toHaveBeenCalledWith('Sintel', 20, 'session-token', undefined);
   });
 
   it('does not request metadata for password-protected search results', async () => {
     const { api, search, getFileInfo } = apiStub();
     search.mockResolvedValue([{ ...file(2), passwordProtected: true }]);
-    const source = createWebshareSource(api, { getSessionToken: vi.fn() });
+    const source = createWebshareSource(api, {
+      getSessionToken: vi.fn().mockResolvedValue('session-token'),
+    });
 
     await expect(source.search('Sintel')).resolves.toEqual([]);
     expect(getFileInfo).not.toHaveBeenCalled();
@@ -89,7 +92,7 @@ describe('Webshare source', () => {
     });
     const source = createWebshareSource(
       api,
-      { getSessionToken: vi.fn() },
+      { getSessionToken: vi.fn().mockResolvedValue('session-token') },
       {
         maximumResults: 3,
         detailConcurrency: 2,

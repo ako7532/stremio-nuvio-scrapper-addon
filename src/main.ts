@@ -2,10 +2,12 @@ import { createHmac } from 'node:crypto';
 
 import { createConfigurationService } from './application/configuration-service.js';
 import { createProductionIntegration } from './application/production-integration.js';
+import type { SearchObserver } from './application/search-observability.js';
 import { testProviderConnection } from './application/provider-connection-tester.js';
 import { createCredentialCipher } from './infrastructure/credential-cipher.js';
 import { parseEnvironment } from './infrastructure/environment.js';
 import { installGracefulShutdown } from './infrastructure/graceful-shutdown.js';
+import { createSearchLogObserver } from './infrastructure/search-logger.js';
 import { createSqliteConfigurationStore } from './infrastructure/sqlite-configuration-store.js';
 import { buildServer } from './http/server.js';
 
@@ -21,11 +23,12 @@ const configurationService = createConfigurationService(store);
 const playbackSecret = createHmac('sha256', environment.CONFIG_ENCRYPTION_KEY)
   .update('stremio-nuvio-addon/playback-token/v1')
   .digest();
+const searchObserver: { current?: SearchObserver } = {};
 const integration = createProductionIntegration({
   configurationService,
   baseUrl: environment.ADDON_BASE_URL,
   playbackSecret,
-  websharePlaybackHosts: environment.WEBSHARE_PLAYBACK_HOSTS,
+  observer: (event) => searchObserver.current?.(event),
 });
 const server = buildServer({
   logger: true,
@@ -41,6 +44,7 @@ const server = buildServer({
   publicBaseUrl: environment.ADDON_BASE_URL,
   trustProxy: environment.TRUST_PROXY,
 });
+searchObserver.current = createSearchLogObserver(server.log);
 server.addHook('onClose', () => store.close?.());
 installGracefulShutdown(server, { timeoutMs: environment.SHUTDOWN_TIMEOUT_MS });
 

@@ -19,15 +19,22 @@ export class TorboxTransportError extends Error {
   override readonly name = 'TorboxTransportError';
   readonly statusCode?: number;
   readonly retryAfterMs?: number;
+  readonly errorCode?: string;
 
   constructor(
     readonly kind: TorboxTransportErrorKind,
     message: string,
-    options?: { statusCode?: number; retryAfterMs?: number; cause?: unknown },
+    options?: {
+      statusCode?: number;
+      retryAfterMs?: number;
+      errorCode?: string;
+      cause?: unknown;
+    },
   ) {
     super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     if (options?.statusCode !== undefined) this.statusCode = options.statusCode;
     if (options?.retryAfterMs !== undefined) this.retryAfterMs = options.retryAfterMs;
+    if (options?.errorCode !== undefined) this.errorCode = options.errorCode;
   }
 }
 
@@ -40,6 +47,7 @@ export type TorboxApiClient = {
   listTorrents(signal?: AbortSignal): Promise<readonly TorboxTorrent[]>;
   getTorrent(torrentId: number, signal?: AbortSignal): Promise<TorboxTorrent>;
   createTorrent(magnetUri: string, signal?: AbortSignal): Promise<TorboxCreatedTorrent>;
+  createTorrentFile?(torrentFile: Uint8Array, signal?: AbortSignal): Promise<TorboxCreatedTorrent>;
   requestDownloadLink(torrentId: number, fileId: number, signal?: AbortSignal): Promise<string>;
 };
 
@@ -55,8 +63,8 @@ export type TorboxApiClientOptions = {
 const envelopeSchema = z.looseObject({
   success: z.boolean(),
   data: z.unknown().optional(),
-  detail: z.string().optional(),
-  error: z.string().optional(),
+  detail: z.string().nullish(),
+  error: z.string().nullish(),
 });
 const DEFAULT_BASE_URL = 'https://api.torbox.app/v1/api/';
 const DEFAULT_TIMEOUT_MS = 8_000;
@@ -97,7 +105,7 @@ export const createTorboxApiClient = (options: TorboxApiClientOptions): TorboxAp
         redirect: 'error',
         signal: requestSignal,
       });
-      if (!response.ok) throw httpError(response);
+      if (!response.ok) throw await httpError(response);
       const contentType = response.headers.get('content-type')?.toLowerCase();
       if (contentType !== undefined && !contentType.includes('json')) {
         throw invalidResponse(`TorBox returned unexpected content type: ${contentType}`);
@@ -118,11 +126,15 @@ export const createTorboxApiClient = (options: TorboxApiClientOptions): TorboxAp
       if (!parsed.success) throw invalidResponse('TorBox returned an invalid response envelope');
       if (!parsed.data.success) {
         const detail = parsed.data.detail ?? 'TorBox rejected the request';
-        const errorCode = parsed.data.error?.toLowerCase() ?? '';
-        if (/(?:auth|token|credential|unauthor)/u.test(errorCode)) {
-          throw new TorboxTransportError('authentication-failed', 'TorBox authentication failed');
+        const errorCode = normalizeSafeErrorCode(parsed.data.error);
+        if (errorCode !== undefined && /(?:AUTH|TOKEN|CREDENTIAL|UNAUTHOR)/u.test(errorCode)) {
+          throw new TorboxTransportError('authentication-failed', 'TorBox authentication failed', {
+            errorCode,
+          });
         }
-        throw invalidResponse(detail);
+        throw new TorboxTransportError('invalid-response', detail, {
+          ...(errorCode === undefined ? {} : { errorCode }),
+        });
       }
       return parsed.data;
     } catch (error) {
@@ -189,13 +201,31 @@ export const createTorboxApiClient = (options: TorboxApiClientOptions): TorboxAp
       const magnet = validateMagnetUri(magnetUri);
       const body = new FormData();
       body.set('magnet', magnet);
+      body.set('allow_zip', 'false');
+      const response = await request('torrents/createtorrent', { method: 'POST', body }, signal);
+      return parseCreatedTorrent(response.data);
+    },
+    async createTorrentFile(torrentFile, signal) {
+      if (torrentFile.byteLength === 0)
+        throw new TypeError('TorBox torrent file must not be empty');
+      const bytes = torrentFile.slice();
+      const body = new FormData();
+      body.set(
+        'file',
+        new Blob([bytes.buffer], { type: 'application/x-bittorrent' }),
+        'upload.torrent',
+      );
+      body.set('allow_zip', 'false');
       const response = await request('torrents/createtorrent', { method: 'POST', body }, signal);
       return parseCreatedTorrent(response.data);
     },
     async requestDownloadLink(torrentId, fileId, signal) {
       const parameters = new URLSearchParams({
+        // TorBox pre tento endpoint vyžaduje token v query aj pri Bearer autorizácii.
+        token: apiKey,
         torrent_id: String(positiveInteger(torrentId, 'torrent ID')),
         file_id: String(nonNegativeInteger(fileId, 'file ID')),
+        zip_link: 'false',
       });
       const response = await request(
         `torrents/requestdl?${parameters.toString()}`,
@@ -242,7 +272,9 @@ const parseCreatedTorrent = (value: unknown): TorboxCreatedTorrent => {
 const parseTorrent = (value: unknown): TorboxTorrent => {
   const data = record(value, 'TorBox torrent');
   const filesValue = data['files'];
-  if (!Array.isArray(filesValue)) throw invalidResponse('TorBox torrent files are not an array');
+  if (filesValue !== undefined && filesValue !== null && !Array.isArray(filesValue)) {
+    throw invalidResponse('TorBox torrent files are not an array');
+  }
   return {
     id: positiveInteger(
       integerField(data, ['id', 'torrent_id'], 'TorBox torrent ID'),
@@ -251,7 +283,19 @@ const parseTorrent = (value: unknown): TorboxTorrent => {
     hash: normalizeInfoHash(stringField(data, ['hash'], 'TorBox torrent hash')),
     name: stringField(data, ['name'], 'TorBox torrent name'),
     downloadState: stringField(data, ['download_state', 'downloadState'], 'TorBox download state'),
-    files: filesValue.map(parseTorrentFile),
+    ...optionalBooleanProperties(data),
+    files: Array.isArray(filesValue) ? filesValue.map(parseTorrentFile) : [],
+  };
+};
+
+const optionalBooleanProperties = (
+  data: Record<string, unknown>,
+): Pick<TorboxTorrent, 'downloadFinished' | 'downloadPresent'> => {
+  const downloadFinished = optionalBooleanField(data, ['download_finished', 'downloadFinished']);
+  const downloadPresent = optionalBooleanField(data, ['download_present', 'downloadPresent']);
+  return {
+    ...(downloadFinished === undefined ? {} : { downloadFinished }),
+    ...(downloadPresent === undefined ? {} : { downloadPresent }),
   };
 };
 
@@ -265,24 +309,48 @@ const parseTorrentFile = (value: unknown): TorboxTorrentFile => {
   };
 };
 
-const httpError = (response: Response): TorboxTransportError => {
+const httpError = async (response: Response): Promise<TorboxTransportError> => {
   const statusCode = response.status;
+  const errorCode = await readSafeErrorCode(response);
+  const errorOptions = {
+    statusCode,
+    ...(errorCode === undefined ? {} : { errorCode }),
+  };
   if (statusCode === 401 || statusCode === 403) {
-    return new TorboxTransportError('authentication-failed', 'TorBox authentication failed', {
-      statusCode,
-    });
+    return new TorboxTransportError(
+      'authentication-failed',
+      'TorBox authentication failed',
+      errorOptions,
+    );
   }
   if (statusCode === 429) {
     const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
     return new TorboxTransportError('rate-limited', 'TorBox rate limit exceeded', {
-      statusCode,
+      ...errorOptions,
       ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
     });
   }
-  return new TorboxTransportError('unavailable', `TorBox returned HTTP ${String(statusCode)}`, {
-    statusCode,
-  });
+  return new TorboxTransportError(
+    'unavailable',
+    `TorBox returned HTTP ${String(statusCode)}`,
+    errorOptions,
+  );
 };
+
+const readSafeErrorCode = async (response: Response): Promise<string | undefined> => {
+  try {
+    const value: unknown = await response.json();
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    return normalizeSafeErrorCode((value as Record<string, unknown>)['error']);
+  } catch {
+    return undefined;
+  }
+};
+
+const normalizeSafeErrorCode = (value: unknown): string | undefined =>
+  typeof value === 'string' && /^[a-z][a-z\d_-]{0,63}$/iu.test(value)
+    ? value.toUpperCase()
+    : undefined;
 
 const parseRetryAfter = (value: string | null, now = Date.now()): number | undefined => {
   if (value === null) return undefined;
@@ -377,6 +445,17 @@ const optionalIntegerField = (
     const candidate = value[name];
     if (typeof candidate === 'number' && Number.isSafeInteger(candidate)) return candidate;
     if (typeof candidate === 'string' && /^\d+$/u.test(candidate)) return Number(candidate);
+  }
+  return undefined;
+};
+
+const optionalBooleanField = (
+  value: Record<string, unknown>,
+  names: readonly string[],
+): boolean | undefined => {
+  for (const name of names) {
+    const candidate = value[name];
+    if (typeof candidate === 'boolean') return candidate;
   }
   return undefined;
 };

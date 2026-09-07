@@ -14,6 +14,7 @@ import {
   type TorboxApiClient,
 } from '../../src/providers/torbox/torbox-api-client.js';
 import { parseRelease } from '../../src/release/release-parser.js';
+import type { TorrentFileStore } from '../../src/application/torrent-file-store.js';
 
 const selectedHash = 'a'.repeat(40);
 const policy: PlaybackPrecachePolicy = {
@@ -29,7 +30,7 @@ const policy: PlaybackPrecachePolicy = {
 };
 
 describe('TorBox precache', () => {
-  it('selects only bounded uncached alternatives in their existing ranked order', () => {
+  it('selects bounded known-cache candidates in their existing ranked order', () => {
     const candidates = [
       candidate('a', 'uncached'),
       candidate('b', 'cached'),
@@ -47,7 +48,7 @@ describe('TorBox precache', () => {
 
     const selected = selectPrecacheCandidates(candidates, policy, new Set([selectedHash]));
 
-    expect(selected.map(({ result }) => result.infoHash)).toEqual(['3'.repeat(40), '5'.repeat(40)]);
+    expect(selected.map(({ result }) => result.infoHash)).toEqual(['b'.repeat(40), '3'.repeat(40)]);
   });
 
   it('deduplicates repeated playback, respects the per-user create budget, and skips account torrents', async () => {
@@ -124,6 +125,95 @@ describe('TorBox precache', () => {
     });
     expect(createTorrent).toHaveBeenCalledTimes(2);
   });
+
+  it('continues with later episodes when TorBox rejects one candidate', async () => {
+    const createTorrent = vi
+      .fn<TorboxApiClient['createTorrent']>()
+      .mockRejectedValueOnce(
+        new TorboxTransportError('unavailable', 'rejected', {
+          statusCode: 400,
+          errorCode: 'DOWNLOAD_SERVER_ERROR',
+        }),
+      )
+      .mockResolvedValue({ id: 2 });
+    const observer = vi.fn();
+    const reference = playbackReference([candidate('b', 'uncached'), candidate('c', 'uncached')], {
+      ...policy,
+      count: 2,
+      preferredLanguagesOnly: false,
+    });
+    reference.safeDebug = true;
+
+    await createTorboxPrecacheScheduler({ observer }).schedule({
+      reference,
+      client: client({ createTorrent }),
+      accountTorrents: [],
+    });
+
+    expect(createTorrent).toHaveBeenCalledTimes(2);
+    expect(observer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'torbox-precache-stage',
+        stage: 'create-torrent',
+        outcome: 'failed',
+        statusCode: 400,
+        errorCode: 'DOWNLOAD_SERVER_ERROR',
+      }),
+    );
+  });
+
+  it('continues after an ambiguous download-server response without an HTTP error status', async () => {
+    const createTorrent = vi
+      .fn<TorboxApiClient['createTorrent']>()
+      .mockRejectedValueOnce(
+        new TorboxTransportError('invalid-response', 'download server error', {
+          errorCode: 'DOWNLOAD_SERVER_ERROR',
+        }),
+      )
+      .mockResolvedValue({ id: 2 });
+    const reference = playbackReference([candidate('b', 'uncached'), candidate('c', 'uncached')], {
+      ...policy,
+      count: 2,
+      preferredLanguagesOnly: false,
+    });
+
+    await createTorboxPrecacheScheduler().schedule({
+      reference,
+      client: client({ createTorrent }),
+      accountTorrents: [],
+    });
+
+    expect(createTorrent).toHaveBeenCalledTimes(2);
+  });
+
+  it('uploads stored torrent metadata for an uncached alternative', async () => {
+    const createTorrent = vi.fn<TorboxApiClient['createTorrent']>();
+    const createTorrentFile = vi
+      .fn<NonNullable<TorboxApiClient['createTorrentFile']>>()
+      .mockResolvedValue({ id: 2 });
+    const getTorrentFile = vi.fn().mockReturnValue(Uint8Array.from([1, 2, 3]));
+    const torrentFiles: TorrentFileStore = {
+      put: vi.fn(),
+      get: getTorrentFile,
+      deleteNamespace: vi.fn(),
+    };
+    const reference = playbackReference([candidate('b', 'uncached')], {
+      ...policy,
+      count: 1,
+      preferredLanguagesOnly: false,
+    });
+
+    await createTorboxPrecacheScheduler().schedule({
+      reference,
+      client: client({ createTorrent, createTorrentFile }),
+      accountTorrents: [],
+      torrentFiles,
+    });
+
+    expect(getTorrentFile).toHaveBeenCalledWith(reference.configId, 'b'.repeat(40));
+    expect(createTorrentFile).toHaveBeenCalledOnce();
+    expect(createTorrent).not.toHaveBeenCalled();
+  });
 });
 
 function candidate(
@@ -169,6 +259,7 @@ function playbackReference(
     configId: 'configuration-1234',
     result: candidate('a', 'cached').result,
     media: { type: 'movie', id: 'tt1234567' },
+    allowUncached: false,
     precacheCandidates,
     precachePolicy,
     expiresAt: Number.MAX_SAFE_INTEGER,

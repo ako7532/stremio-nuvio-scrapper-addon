@@ -12,9 +12,9 @@ encrypted in server-side SQLite storage and the browser receives only configured
   magnet URI, or raw hash in an HTTP stream URL.
 - **Webshare** requires the individual user's username and password. Search is read-only; authentication
   and temporary link generation happen only on playback GET through server-held provider services.
-  Results remain hidden until the deployment has an exact credential-verified media-host allowlist.
-- **TorBox** is optional and uses the individual user's API key for cache checks, selected playback, and
-  explicitly configured alternative precache.
+  The temporary HTTPS media URL is resolved only after an explicit playback GET.
+- **TorBox** is optional and uses the individual user's API key only after a playback click: to reuse or
+  check the selected torrent, resolve playback, and run explicitly configured alternative precache.
 
 Provider connection tests execute server-side and return sanitized status only. Removing a credential
 does not disable its provider toggle automatically; keep enabled providers and available credentials in
@@ -32,10 +32,14 @@ overall result limit. Compact mode shortens labels; detailed mode includes the n
 
 ## TorBox and precache
 
-Unknown cache state is never treated as uncached. Uncached results appear only when explicitly enabled.
-Precache count defaults to zero and is capped at ten. Precache starts only after a real GET successfully
-resolves the selected playback; search and HEAD remain mutation-free. Score, seeders, size, total size,
-resolution, and preferred-language limits can narrow eligible alternatives.
+The source-list request does not contact TorBox, so SKTorrent results are shown without a live cache
+label. After a real playback GET, an existing account torrent is reused. If adding uncached torrents is
+disabled, the selected hash is checked and a non-cached torrent is rejected without adding it. If it is
+enabled, the selected torrent may be added after the click.
+Precache count defaults to zero and is capped at ten. For series it searches the following episodes in
+the same season and selects at most one suitable torrent for each episode. Precache starts only after a
+real GET successfully resolves the selected playback; search and HEAD remain mutation-free. Score,
+seeders, size, total size, resolution, and preferred-language limits can narrow eligible episodes.
 
 ## Advanced settings
 

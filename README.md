@@ -37,7 +37,6 @@ base64-encoded 32-byte key; changing or losing it makes saved credentials unread
 CONFIG_ENCRYPTION_KEY=<base64-encoded 32-byte key>
 CONFIG_DATABASE_PATH=addon.sqlite
 ADDON_BASE_URL=http://127.0.0.1:7000
-WEBSHARE_PLAYBACK_HOSTS=<comma-separated exact hosts verified for your account>
 ```
 
 Use HTTPS for `ADDON_BASE_URL` outside local development. Both `.env` and SQLite database files are
@@ -90,7 +89,7 @@ Operational references are in [deployment](./docs/DEPLOYMENT.md),
 - Compact and detailed Stremio formatting for direct torrents and opaque Webshare play URLs
 - Strict parsing of standard Stremio movie and series stream identifiers
 - Typed, bounded TorBox authentication, batched cache, torrent, and download-link transport
-- Short-lived TorBox cache enrichment with explicit cached, uncached, and unknown states
+- Click-deferred TorBox cache checks for selected playback, plus bounded cache enrichment for precache
 - Authenticated-encrypted opaque play tokens backed by expiring server-side release references
 - Read-only HEAD playback validation and idempotent GET redirect resolution
 - Episode-aware video-file selection for single files and season packs
@@ -108,12 +107,13 @@ Operational references are in [deployment](./docs/DEPLOYMENT.md),
 - Graceful shutdown, explicit reverse-proxy trust, Docker deployment, and CI quality gates
 
 Production metadata and per-user search/playback dependency wiring is assembled outside `src/main.ts`
-and reused by configuration ID plus update timestamp. Search and HEAD remain side-effect free. After a real GET has successfully resolved
+and reused by configuration ID plus update timestamp. Stream search does not contact TorBox, and HEAD
+only validates the opaque playback reference. TorBox account/cache/download operations begin on the
+real playback GET. After that GET has successfully resolved
 the selected stream, the scheduler may add only the configured number of eligible uncached alternatives.
 The selected torrent is excluded, and precache never delays or fails its playback redirect.
 Webshare's authenticated login/link flow is credential-backed and runs only on a real playback GET.
-Webshare streams are emitted only when `WEBSHARE_PLAYBACK_HOSTS` contains the exact credential-verified
-media hosts; an empty allowlist deliberately keeps them hidden.
+Webshare playback resolves the provider's temporary HTTPS media URL only after an explicit playback GET.
 An authenticated, sanitized fixture proves that the observed 40-character SKTorrent detail identifier
 matches the BitTorrent v1 info hash. Torrent metadata parsing still verifies that equality before it may
 emit an `infoHash` or magnet URI; page identifiers are never trusted without the downloaded metainfo.

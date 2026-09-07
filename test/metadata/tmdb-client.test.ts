@@ -56,6 +56,34 @@ describe('TMDB client', () => {
     expect(String(error)).not.toContain('private');
   });
 
+  it('resolves TVDB external IDs and direct TMDB IDs', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(await fixture('find-series.json'), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(await fixture('series-details.json'), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    const client = createTmdbClient({ accessToken: 'sanitized-user-token', fetch: fetchMock });
+
+    await expect(
+      client.findByTvdbId({ type: 'series', id: 'tvdb:83757', season: 1, episode: 1 }),
+    ).resolves.toMatchObject({ id: 1399, originalTitle: 'Severne kralovstvo' });
+    await expect(client.getById('series', 1399)).resolves.toMatchObject({
+      id: 1399,
+      originalTitle: 'Severne kralovstvo',
+    });
+    expect(fetchMock.mock.calls.map(([url]) => inputUrl(url))).toEqual([
+      'https://api.themoviedb.org/3/find/83757?external_source=tvdb_id&language=en-US',
+      'https://api.themoviedb.org/3/tv/1399?language=en-US',
+    ]);
+  });
+
   it('rejects malformed and oversized JSON responses', async () => {
     const malformed = createTmdbClient({
       accessToken: 'sanitized-user-token',
@@ -83,3 +111,8 @@ describe('TMDB client', () => {
     });
   });
 });
+
+const inputUrl = (input: Parameters<typeof fetch>[0]): string => {
+  if (typeof input === 'string') return input;
+  return input instanceof URL ? input.toString() : input.url;
+};

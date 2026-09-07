@@ -28,8 +28,9 @@ describe('Stremio stream formatter', () => {
 
     expect(streams).toEqual([
       {
-        name: 'CZ/SK 1080p',
-        title: 'SK 1080p WEB-DL HEVC\n2.0 GB • EAC3 • SKTorrent • S:34 • cached',
+        name: 'SKTorrent 1080p',
+        title:
+          'Movie.1080p.WEB-DL.SK.HEVC.EAC3.5.1.mkv\nSK 1080p WEB-DL HEVC\n2.0 GB • EAC3 • S:34 • cached',
         infoHash: 'a'.repeat(40),
         behaviorHints: { filename: result.filename },
       },
@@ -51,11 +52,28 @@ describe('Stremio stream formatter', () => {
 
     expect(streams).toEqual([
       expect.objectContaining({
+        type: 'movie',
         url: 'https://addon.example/play/opaque-token',
-        behaviorHints: { filename: result.filename },
+        behaviorHints: {
+          filename: result.filename,
+          notWebReady: true,
+          videoSize: result.sizeBytes,
+        },
       }),
     ]);
     expect(streams[0]).not.toHaveProperty('infoHash');
+  });
+
+  it('clearly marks an uncached TorBox stream as requiring a first download attempt', () => {
+    const streams = formatStreams(
+      [{ ...ranked, result: { ...result, cacheStatus: 'uncached' } }],
+      configuration('torbox-only'),
+      undefined,
+      () => 'https://addon.example/play/opaque-token',
+      { type: 'movie', id: 'tt0807840' },
+    );
+
+    expect(streams[0]?.title).toContain('TorBox download required');
   });
 
   it('does not expose an unresolved multi-file series torrent', () => {

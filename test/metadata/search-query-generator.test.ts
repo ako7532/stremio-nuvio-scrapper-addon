@@ -19,8 +19,30 @@ describe('search query generation', () => {
       'Pelíšky 1999',
       'pelisky 1999',
       'Cosy Dens 1999',
+      'Cosy Dens',
     ]);
     expect(queries.every((query) => query.type === 'movie')).toBe(true);
+    expect(queries.filter((query) => query.fallback).map(({ value }) => value)).toEqual([
+      'Cosy Dens',
+    ]);
+  });
+
+  it('does not use alternative or single-word titles as broad movie fallbacks', () => {
+    const queries = generateSearchQueries({
+      type: 'movie',
+      id: 'tt0807840',
+      originalTitle: 'Elephants Dream',
+      alternativeTitles: ['Orange'],
+      year: 2006,
+    });
+
+    expect(queries.map(({ value }) => value)).toEqual([
+      'Elephants Dream 2006',
+      'Orange 2006',
+      'Elephants Dream',
+    ]);
+    expect(queries.find(({ value }) => value === 'Elephants Dream')?.fallback).toBe(true);
+    expect(queries.some(({ value }) => value === 'Orange')).toBe(false);
   });
 
   it('creates common episode forms and opt-in season-pack forms', () => {
@@ -48,6 +70,20 @@ describe('search query generation', () => {
       'The Bridge 1x04',
       'The Bridge S01',
       'The Bridge Season 1',
+      'Most',
+      'The Bridge',
+    ]);
+    expect(queries.filter((query) => query.fallback).map(({ value }) => value)).toEqual([
+      'Most S01',
+      'Most Season 1',
+      'The Bridge S01',
+      'The Bridge Season 1',
+      'Most',
+      'The Bridge',
+    ]);
+    expect(queries.filter((query) => query.broad).map(({ value }) => value)).toEqual([
+      'Most',
+      'The Bridge',
     ]);
   });
 

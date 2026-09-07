@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { MediaMetadata } from '../../src/domain/media.js';
-import { matchEpisode, parseEpisodeCoverage } from '../../src/matching/episode-matcher.js';
+import {
+  matchEpisode,
+  parseEpisodeCoverage,
+  releaseCoversSeason,
+} from '../../src/matching/episode-matcher.js';
 
 const metadata: MediaMetadata = {
   type: 'series',
@@ -22,6 +26,25 @@ describe('episode matcher', () => {
         releaseName: 'Dark.S01E04.1080p.WEB-DL',
       }),
     ).toMatchObject({ matched: true, score: 100, kind: 'single-episode' });
+  });
+
+  it('accepts a localized and original title pair separated by a slash', () => {
+    expect(
+      matchEpisode(
+        {
+          ...metadata,
+          originalTitle: 'Breaking Bad',
+          czechTitle: 'Perníkový táta',
+          episode: 1,
+        },
+        {
+          mediaType: 'series',
+          title: 'Perníkový táta / Breaking Bad S01E01 - Pilot',
+          releaseName: 'Perníkový táta / Breaking Bad S01E01 - Pilot (2008)(CZ/EN)[1080p]',
+          filename: '01 Pilot.mkv',
+        },
+      ),
+    ).toMatchObject({ matched: true, kind: 'single-episode' });
   });
 
   it('rejects another episode and another season', () => {
@@ -73,6 +96,41 @@ describe('episode matcher', () => {
         releaseName: 'Dark.Season.2.Complete.1080p',
       }).matched,
     ).toBe(false);
+  });
+
+  it('accepts localized season packs and multi-season ranges only when they cover the season', () => {
+    const complete = {
+      mediaType: 'series' as const,
+      title: 'Mafstory - 1. - 11. serie',
+      releaseName: 'Mafstory - 1. - 11. serie (2006)(SK)[TvRip]',
+    };
+
+    expect(
+      matchEpisode(
+        {
+          ...metadata,
+          originalTitle: 'Mafstory',
+          season: 1,
+          episode: 1,
+        },
+        complete,
+      ),
+    ).toMatchObject({ matched: true, kind: 'season-pack' });
+    expect(
+      matchEpisode(
+        {
+          ...metadata,
+          originalTitle: 'Mafstory',
+          season: 12,
+          episode: 1,
+        },
+        complete,
+      ),
+    ).toMatchObject({ matched: false, reasons: ['season mismatch'] });
+    expect(parseEpisodeCoverage('Mafstory 7. serie')?.season).toBe(7);
+    expect(parseEpisodeCoverage('Mafstory seria 8')?.season).toBe(8);
+    expect(releaseCoversSeason('Mafstory - 1. - 11. serie', 1)).toBe(true);
+    expect(releaseCoversSeason('Mafstory - 1. - 11. serie', 12)).toBe(false);
   });
 
   it('requires an explicit episode or pack marker', () => {

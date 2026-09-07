@@ -7,12 +7,21 @@ import { defaultConfiguration } from '../../src/domain/configuration-defaults.js
 import type { TmdbClient } from '../../src/metadata/tmdb-client.js';
 import { buildServer } from '../../src/http/server.js';
 import type { StreamProvider } from '../../src/providers/provider.js';
+import type { TorboxApiClient } from '../../src/providers/torbox/torbox-api-client.js';
 import { parseRelease } from '../../src/release/release-parser.js';
 
 describe('production integration', () => {
   it('returns fixture-backed movie and episode streams and reuses the runtime caches', async () => {
-    const stored = configuration();
+    const base = configuration();
+    const stored: StoredConfiguration = {
+      ...base,
+      configuration: {
+        ...base.configuration,
+        advanced: { providerTimeoutMs: 8_000, safeDebug: true },
+      },
+    };
     const service = configurationService(stored);
+    const observer = vi.fn();
     const findByImdbId = vi
       .fn<TmdbClient['findByImdbId']>()
       .mockImplementation((request) =>
@@ -25,6 +34,8 @@ describe('production integration', () => {
     const tmdb: TmdbClient = {
       validateAuthentication: vi.fn(),
       findByImdbId,
+      findByTvdbId: vi.fn(),
+      getById: vi.fn(),
       getLocalizedTitle: vi
         .fn()
         .mockImplementation((type) =>
@@ -70,6 +81,7 @@ describe('production integration', () => {
       configurationService: service,
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(7),
+      observer,
       factories: {
         tmdbClient: () => tmdb,
         sktorrentProvider: () => provider,
@@ -94,6 +106,9 @@ describe('production integration', () => {
     });
     expect(findByImdbId).toHaveBeenCalledTimes(2);
     expect(providerSearch.mock.calls.length).toBeGreaterThan(0);
+    expect(observer).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'search-start', correlationId: 'fixture-request' }),
+    );
 
     const server = buildServer({
       configurationService: service,
@@ -127,6 +142,8 @@ describe('production integration', () => {
         tmdbClient: () => ({
           validateAuthentication: vi.fn(),
           findByImdbId: vi.fn().mockResolvedValue(undefined),
+          findByTvdbId: vi.fn().mockResolvedValue(undefined),
+          getById: vi.fn(),
           getLocalizedTitle: vi.fn(),
           getAlternativeTitles: vi.fn(),
         }),
@@ -154,6 +171,86 @@ describe('production integration', () => {
     ).rejects.toMatchObject({ kind: 'InvalidConfiguration' });
   });
 
+  it('does not contact TorBox while production stream results are loading', async () => {
+    const base = configuration();
+    const stored: StoredConfiguration = {
+      ...base,
+      configuration: {
+        ...base.configuration,
+        providers: {
+          sktorrent: { enabled: true, playbackMode: 'torbox-only' },
+          webshare: { enabled: false },
+        },
+      },
+      credentials: {
+        ...base.credentials,
+        torbox: { apiKey: 'server-held-fixture-key' },
+      },
+    };
+    const checkCached = vi.fn<TorboxApiClient['checkCached']>();
+    const listTorrents = vi.fn<TorboxApiClient['listTorrents']>();
+    const torbox: TorboxApiClient = {
+      validateAuthentication: vi.fn(),
+      checkCached,
+      listTorrents,
+      getTorrent: vi.fn(),
+      createTorrent: vi.fn(),
+      requestDownloadLink: vi.fn(),
+    };
+    const filename = 'Sintel.2010.1080p.WEB-DL.CZ.HEVC.mkv';
+    const integration = createProductionIntegration({
+      configurationService: configurationService(stored),
+      baseUrl: 'https://addon.example/',
+      playbackSecret: new Uint8Array(32).fill(4),
+      factories: {
+        tmdbClient: () => ({
+          validateAuthentication: vi.fn(),
+          findByImdbId: vi
+            .fn()
+            .mockResolvedValue({ id: 11, originalTitle: 'Sintel', title: 'Sintel', year: 2010 }),
+          findByTvdbId: vi.fn(),
+          getById: vi.fn(),
+          getLocalizedTitle: vi.fn().mockResolvedValue('Sintel'),
+          getAlternativeTitles: vi.fn().mockResolvedValue([]),
+        }),
+        sktorrentProvider: () =>
+          provider(
+            'sktorrent',
+            vi.fn().mockResolvedValue([
+              {
+                provider: 'sktorrent' as const,
+                source: 'torrent' as const,
+                id: 'movie-result',
+                title: filename,
+                releaseName: filename,
+                filename,
+                mediaType: 'movie' as const,
+                providerUrl: 'https://sktorrent.eu/torrent/details.php?id=fixture',
+                infoHash: 'a'.repeat(40),
+                magnetUri: `magnet:?xt=urn:btih:${'a'.repeat(40)}`,
+                cacheStatus: 'unknown' as const,
+                parsed: parseRelease(filename),
+                seeders: 10,
+              },
+            ]),
+          ),
+        torboxClient: () => torbox,
+      },
+    });
+
+    const streams = await integration
+      .searchStreamsForConfiguration(stored)
+      .search(
+        { type: 'movie', id: 'tt0000011' },
+        { signal: new AbortController().signal, correlationId: 'deferred-torbox-production' },
+      );
+
+    expect(streams).toHaveLength(1);
+    expect(streams[0]).toHaveProperty('url');
+    expect(checkCached).not.toHaveBeenCalled();
+    expect(listTorrents).not.toHaveBeenCalled();
+  });
+
   it('assembles SKTorrent and Webshare only when independently enabled', () => {
     const base = configuration();
     const service = configurationService(base);
@@ -164,11 +261,12 @@ describe('production integration', () => {
       configurationService: service,
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(5),
-      websharePlaybackHosts: ['media.example.test'],
       factories: {
         tmdbClient: () => ({
           validateAuthentication: vi.fn(),
           findByImdbId: vi.fn(),
+          findByTvdbId: vi.fn(),
+          getById: vi.fn(),
           getLocalizedTitle: vi.fn(),
           getAlternativeTitles: vi.fn(),
         }),

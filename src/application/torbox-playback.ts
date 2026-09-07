@@ -1,12 +1,24 @@
 import type { MediaRequest } from '../domain/media.js';
 import type { UserConfiguration } from '../domain/configuration.js';
 import type { TorboxPlaybackUrlFactory } from '../http/stream-formatter.js';
-import type { RankedResult, TorrentProviderResult } from '../domain/release.js';
-import type { TorboxApiClient } from '../providers/torbox/torbox-api-client.js';
+import {
+  TorboxTransportError,
+  type TorboxApiClient,
+} from '../providers/torbox/torbox-api-client.js';
 import type { TorboxTorrent, TorboxTorrentFile } from '../providers/torbox/torbox-types.js';
 import type { PlayTokenClaims, PlayTokenService } from '../security/play-token.js';
-import type { PlaybackReference, PlaybackReferenceStore } from './playback-reference-store.js';
+import type {
+  PlaybackReference,
+  PlaybackReferenceStore,
+  PrecacheCandidate,
+} from './playback-reference-store.js';
 import type { TorboxPrecacheScheduler } from './torbox-precache.js';
+import type { TorrentFileStore } from './torrent-file-store.js';
+import {
+  observeSearch,
+  type SearchObserver,
+  type TorboxPlaybackStage,
+} from './search-observability.js';
 
 export type TorboxCredential = {
   configId: string;
@@ -22,6 +34,7 @@ export type TorboxApiClientFactory = (apiKey: string) => TorboxApiClient;
 export type PlaybackResolution = {
   url: string;
   filename: string;
+  pending?: boolean;
 };
 
 export class PlaybackResolveError extends Error {
@@ -53,19 +66,24 @@ export type TorboxPlaybackResolverOptions = {
   credentials: TorboxCredentialStore;
   createClient: TorboxApiClientFactory;
   allowedPlaybackHosts?: readonly string[];
+  pendingPlaybackUrl: string;
   resolutionTtlMs?: number;
   clock?: () => number;
   precache?: TorboxPrecacheScheduler;
+  observer?: SearchObserver;
+  torrentFiles?: TorrentFileStore;
+  resolvePrecacheCandidates?: (
+    reference: PlaybackReference,
+  ) => Promise<readonly PrecacheCandidate[]>;
 };
 
 export type TorboxPlaybackUrlFactoryOptions = {
   baseUrl: string;
   configId: string;
-  tokens: PlayTokenService;
   references: PlaybackReferenceStore;
 };
 
-const DEFAULT_ALLOWED_PLAYBACK_HOSTS = ['torbox.app', 'torboxcdn.com'] as const;
+const DEFAULT_ALLOWED_PLAYBACK_HOSTS = ['torbox.app', 'torboxcdn.com', 'tb-cdn.io'] as const;
 const DEFAULT_RESOLUTION_TTL_MS = 2 * 60 * 1_000;
 
 export const createTorboxPlaybackUrlFactory = (
@@ -73,7 +91,7 @@ export const createTorboxPlaybackUrlFactory = (
 ): TorboxPlaybackUrlFactory => {
   const baseUrl = validateAddonBaseUrl(options.baseUrl);
   const configId = validateOpaqueId(options.configId, 'configuration ID');
-  return (providerResult, media, candidates, configuration) => {
+  return (providerResult, media, _candidates, configuration) => {
     if (providerResult.magnetUri === undefined) {
       throw new TypeError('TorBox playback requires a verified magnet URI');
     }
@@ -81,11 +99,14 @@ export const createTorboxPlaybackUrlFactory = (
       configId,
       result: providerResult,
       media,
-      precacheCandidates: toPrecacheCandidates(candidates),
+      allowUncached: configuration.torbox.showUncached,
+      precacheCandidates: [],
       precachePolicy: toPrecachePolicy(configuration),
+      safeDebug: configuration.advanced?.safeDebug === true,
     });
-    const token = options.tokens.issue(claimsFor(reference));
-    return new URL(`play/${encodeURIComponent(token)}`, baseUrl).toString();
+    const token = reference.id;
+    const action = providerResult.cacheStatus === 'uncached' ? 'download' : 'play';
+    return new URL(`${action}/${encodeURIComponent(token)}/video.mp4`, baseUrl).toString();
   };
 };
 
@@ -100,19 +121,23 @@ export const createTorboxPlaybackResolver = (
     'playback resolution TTL',
   );
   const clock = options.clock ?? Date.now;
+  const pendingPlaybackUrl = validatePendingPlaybackUrl(options.pendingPlaybackUrl);
   const resolutions = new Map<string, { value: Promise<PlaybackResolution>; expiresAt: number }>();
 
   const inspect = async (token: string): Promise<ValidatedPlayback> => {
-    const claims = options.tokens.verify(token);
-    if (claims.provider !== 'sktorrent') {
-      throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
+    let reference = options.references.get(token);
+    if (reference === undefined) {
+      const claims = options.tokens.verify(token);
+      if (claims.provider !== 'sktorrent') {
+        throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
+      }
+      reference = options.references.get(claims.referenceId);
+      if (reference === undefined || !referenceMatchesClaims(reference, claims)) {
+        throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
+      }
     }
-    const reference = options.references.get(claims.referenceId);
-    if (reference === undefined || !referenceMatchesClaims(reference, claims)) {
-      throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
-    }
-    const credential = await options.credentials.get(claims.configId);
-    if (credential?.configId !== claims.configId) {
+    const credential = await options.credentials.get(reference.configId);
+    if (credential?.configId !== reference.configId) {
       throw new PlaybackResolveError(
         'configuration-not-found',
         'Playback configuration is unavailable',
@@ -124,7 +149,7 @@ export const createTorboxPlaybackResolver = (
         'Playback configuration is unavailable',
       );
     }
-    return { claims, reference, credential };
+    return { reference, credential };
   };
 
   return {
@@ -140,12 +165,21 @@ export const createTorboxPlaybackResolver = (
         validated,
         options.createClient,
         allowedHosts,
+        pendingPlaybackUrl,
         options.precache,
+        options.observer,
+        options.torrentFiles,
+        options.resolvePrecacheCandidates,
+        clock,
         signal,
       );
       resolutions.set(token, { value, expiresAt: clock() + resolutionTtlMs });
       try {
-        return await value;
+        const resolution = await value;
+        if (resolution.pending === true && resolutions.get(token)?.value === value) {
+          resolutions.delete(token);
+        }
+        return resolution;
       } catch (error) {
         if (resolutions.get(token)?.value === value) resolutions.delete(token);
         throw error;
@@ -155,7 +189,6 @@ export const createTorboxPlaybackResolver = (
 };
 
 type ValidatedPlayback = {
-  claims: TorboxPlayTokenClaims;
   reference: PlaybackReference;
   credential: TorboxCredential;
 };
@@ -164,26 +197,62 @@ const resolvePlayback = async (
   playback: ValidatedPlayback,
   createClient: TorboxApiClientFactory,
   allowedHosts: readonly string[],
+  pendingPlaybackUrl: string,
   precache: TorboxPrecacheScheduler | undefined,
+  observer: SearchObserver | undefined,
+  torrentFiles: TorrentFileStore | undefined,
+  resolvePrecacheCandidates:
+    ((reference: PlaybackReference) => Promise<readonly PrecacheCandidate[]>) | undefined,
+  clock: () => number,
   signal?: AbortSignal,
 ): Promise<PlaybackResolution> => {
   const client = createClient(playback.credential.apiKey);
   const hash = playback.reference.result.infoHash.toLowerCase();
-  const accountTorrents = await client.listTorrents(signal);
+  const runStage = <Value>(stage: TorboxPlaybackStage, operation: () => Promise<Value>) =>
+    observePlaybackStage(playback.reference, observer, clock, stage, operation);
+  const accountTorrents = await runStage('list-torrents', () => client.listTorrents(signal));
   let torrent = accountTorrents.find((candidate) => candidate.hash.toLowerCase() === hash);
   if (torrent === undefined) {
+    if (!playback.reference.allowUncached) {
+      const cacheEntries = await runStage('check-cache', () => client.checkCached([hash], signal));
+      const cacheStatus = cacheEntries.find((entry) => entry.hash.toLowerCase() === hash)?.status;
+      if (cacheStatus !== 'cached') {
+        throw new PlaybackResolveError(
+          'torrent-unavailable',
+          'The selected torrent is not cached on TorBox',
+        );
+      }
+    }
     const magnetUri = playback.reference.result.magnetUri;
     if (magnetUri === undefined) {
       throw new PlaybackResolveError('invalid-reference', 'Verified magnet URI is unavailable');
     }
-    const created = await client.createTorrent(magnetUri, signal);
+    const torrentFile = torrentFiles?.get(playback.reference.configId, hash);
+    const created = await runStage('create-torrent', () =>
+      torrentFile !== undefined && client.createTorrentFile !== undefined
+        ? client.createTorrentFile(torrentFile, signal)
+        : client.createTorrent(magnetUri, signal),
+    );
     if (created.hash !== undefined && created.hash.toLowerCase() !== hash) {
       throw new PlaybackResolveError('invalid-reference', 'Created torrent hash does not match');
     }
-    torrent = await client.getTorrent(created.id, signal);
-    if (torrent.hash.toLowerCase() !== hash) {
-      throw new PlaybackResolveError('invalid-reference', 'Resolved torrent hash does not match');
-    }
+    // TorBox may expose a newly-created magnet before its metadata and files are available.
+    // Do not turn that expected transition into a 502; the next playback GET reads fresh state.
+    return {
+      url: pendingPlaybackUrl,
+      filename: 'torbox-downloading.mp4',
+      pending: true,
+    };
+  } else if (!isTorrentReady(torrent)) {
+    const torrentId = torrent.id;
+    torrent = await runStage('refresh-torrent', () => client.getTorrent(torrentId, signal));
+  }
+  if (!isTorrentReady(torrent)) {
+    return {
+      url: pendingPlaybackUrl,
+      filename: 'torbox-downloading.mp4',
+      pending: true,
+    };
   }
   const file = selectVideoFile(
     torrent,
@@ -197,18 +266,50 @@ const resolvePlayback = async (
     );
   }
   const url = validateProviderPlaybackUrl(
-    await client.requestDownloadLink(torrent.id, file.id, signal),
+    await runStage('request-download-link', () =>
+      client.requestDownloadLink(torrent.id, file.id, signal),
+    ),
     allowedHosts,
   );
   if (precache !== undefined) {
     try {
-      void precache
-        .schedule({
-          reference: playback.reference,
-          client,
-          accountTorrents,
-        })
-        .catch(() => undefined);
+      void (async () => {
+        const startedAt = clock();
+        try {
+          const precacheCandidates =
+            resolvePrecacheCandidates === undefined
+              ? playback.reference.precacheCandidates
+              : await resolvePrecacheCandidates(playback.reference);
+          if (playback.reference.safeDebug === true) {
+            observeSearch(observer, {
+              type: 'torbox-precache-stage',
+              stage: 'discovery',
+              outcome: 'complete',
+              durationMs: Math.max(0, clock() - startedAt),
+              candidateCount: precacheCandidates.length,
+            });
+          }
+          await precache.schedule({
+            reference: { ...playback.reference, precacheCandidates },
+            client,
+            accountTorrents,
+            ...(torrentFiles === undefined ? {} : { torrentFiles }),
+          });
+        } catch (error) {
+          if (playback.reference.safeDebug === true) {
+            observeSearch(observer, {
+              type: 'torbox-precache-stage',
+              stage: 'discovery',
+              outcome: 'failed',
+              durationMs: Math.max(0, clock() - startedAt),
+              category: error instanceof TorboxTransportError ? error.kind : 'unexpected',
+              ...(error instanceof TorboxTransportError && error.statusCode !== undefined
+                ? { statusCode: error.statusCode }
+                : {}),
+            });
+          }
+        }
+      })();
     } catch {
       // Precache nesmie ovplyvniť prehratie vybraného streamu.
     }
@@ -216,27 +317,41 @@ const resolvePlayback = async (
   return { url, filename: file.name };
 };
 
-const toPrecacheCandidates = (candidates: readonly RankedResult[]) =>
-  candidates.flatMap(({ result, matchScore }) =>
-    result.provider === 'sktorrent' ? [{ result: cloneTorrentResult(result), matchScore }] : [],
-  );
-
-const cloneTorrentResult = (result: TorrentProviderResult): TorrentProviderResult => ({
-  ...result,
-  ...(result.parsed === undefined
-    ? {}
-    : {
-        parsed: {
-          ...result.parsed,
-          audioCodecs: [...result.parsed.audioCodecs],
-          languages: {
-            ...result.parsed.languages,
-            audio: [...result.parsed.languages.audio],
-            subtitles: [...result.parsed.languages.subtitles],
-          },
-        },
-      }),
-});
+const observePlaybackStage = async <Value>(
+  reference: PlaybackReference,
+  observer: SearchObserver | undefined,
+  clock: () => number,
+  stage: TorboxPlaybackStage,
+  operation: () => Promise<Value>,
+): Promise<Value> => {
+  const startedAt = clock();
+  try {
+    const value = await operation();
+    if (reference.safeDebug === true) {
+      observeSearch(observer, {
+        type: 'torbox-playback-stage',
+        stage,
+        outcome: 'complete',
+        durationMs: Math.max(0, clock() - startedAt),
+      });
+    }
+    return value;
+  } catch (error) {
+    if (reference.safeDebug === true) {
+      observeSearch(observer, {
+        type: 'torbox-playback-stage',
+        stage,
+        outcome: 'failed',
+        durationMs: Math.max(0, clock() - startedAt),
+        category: error instanceof TorboxTransportError ? error.kind : 'unexpected',
+        ...(error instanceof TorboxTransportError && error.statusCode !== undefined
+          ? { statusCode: error.statusCode }
+          : {}),
+      });
+    }
+    throw error;
+  }
+};
 
 const toPrecachePolicy = (
   configuration: UserConfiguration,
@@ -296,6 +411,14 @@ export const selectVideoFile = (
 
 const VIDEO_EXTENSION = /\.(?:mkv|mp4|m4v|avi|mov|webm|ts|m2ts)$/iu;
 
+export const isTorrentReady = (torrent: TorboxTorrent): boolean => {
+  if (torrent.downloadFinished !== undefined || torrent.downloadPresent !== undefined) {
+    return torrent.downloadFinished === true && torrent.downloadPresent === true;
+  }
+  const state = torrent.downloadState.trim().toLocaleLowerCase('en-US');
+  return state === 'cached' || state === 'uploading' || state === 'uploading (no peers)';
+};
+
 const matchesEpisode = (name: string, season: number, episode: number): boolean => {
   const patterns = [
     new RegExp(`(?:^|[^a-z\\d])s0*${String(season)}e0*${String(episode)}(?:[^\\d]|$)`, 'iu'),
@@ -303,19 +426,6 @@ const matchesEpisode = (name: string, season: number, episode: number): boolean 
   ];
   return patterns.some((pattern) => pattern.test(name));
 };
-
-const claimsFor = (reference: PlaybackReference): Omit<TorboxPlayTokenClaims, 'expiresAt'> => ({
-  configId: reference.configId,
-  referenceId: reference.id,
-  provider: 'sktorrent',
-  providerResultId: reference.result.id,
-  infoHash: reference.result.infoHash.toLowerCase(),
-  mediaType: reference.media.type,
-  mediaId: reference.media.id,
-  ...(reference.media.type === 'series'
-    ? { season: reference.media.season, episode: reference.media.episode }
-    : {}),
-});
 
 const referenceMatchesClaims = (
   reference: PlaybackReference,
@@ -359,6 +469,21 @@ const validateAddonBaseUrl = (value: string): URL => {
   url.search = '';
   url.hash = '';
   return url;
+};
+
+const validatePendingPlaybackUrl = (value: string): string => {
+  const url = new URL(value);
+  const local = url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname);
+  if (
+    (url.protocol !== 'https:' && !local) ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.search.length > 0 ||
+    url.hash.length > 0
+  ) {
+    throw new TypeError('TorBox pending playback URL is invalid');
+  }
+  return url.toString();
 };
 
 const normalizeAllowedHost = (value: string): string => {

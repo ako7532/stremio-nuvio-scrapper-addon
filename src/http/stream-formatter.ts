@@ -8,11 +8,16 @@ import type {
 } from '../domain/release.js';
 
 export type StremioStream = {
+  type?: MediaRequest['type'];
   name: string;
   title: string;
   url?: string;
   infoHash?: string;
-  behaviorHints?: { filename?: string };
+  behaviorHints?: {
+    filename?: string;
+    notWebReady?: boolean;
+    videoSize?: number;
+  };
 };
 
 export type WebsharePlaybackUrlFactory = (
@@ -44,7 +49,7 @@ export function formatStreams(
       precacheCandidates,
     );
     if (playback === undefined) return [];
-    return [{ ...displayFields(result, configuration.display.mode), ...playback }];
+    return [{ ...displayFields(result, configuration), ...playback }];
   });
 }
 
@@ -55,7 +60,7 @@ function playbackFields(
   torboxPlaybackUrl: TorboxPlaybackUrlFactory | undefined,
   media: MediaRequest | undefined,
   rankedResults: readonly RankedResult[],
-): Pick<StremioStream, 'url' | 'infoHash' | 'behaviorHints'> | undefined {
+): Pick<StremioStream, 'type' | 'url' | 'infoHash' | 'behaviorHints'> | undefined {
   if (result.provider === 'sktorrent') {
     if (configuration.providers.sktorrent.playbackMode === 'direct-torrent') {
       if (result.mediaType === 'series' && result.filename === undefined) return undefined;
@@ -66,8 +71,13 @@ function playbackFields(
     }
     if (torboxPlaybackUrl === undefined || media === undefined) return undefined;
     return {
+      type: media.type,
       url: validatePlaybackUrl(torboxPlaybackUrl(result, media, rankedResults, configuration)),
-      ...(result.filename === undefined ? {} : { behaviorHints: { filename: result.filename } }),
+      behaviorHints: {
+        filename: result.filename ?? result.releaseName,
+        notWebReady: true,
+        ...(result.sizeBytes === undefined ? {} : { videoSize: result.sizeBytes }),
+      },
     };
   }
   if (websharePlaybackUrl === undefined) return undefined;
@@ -79,8 +89,9 @@ function playbackFields(
 
 function displayFields(
   result: ProviderResult,
-  mode: UserConfiguration['display']['mode'],
+  configuration: UserConfiguration,
 ): Pick<StremioStream, 'name' | 'title'> {
+  const mode = configuration.display.mode;
   const parsed = result.parsed;
   const technical = [
     parsed?.resolution,
@@ -103,19 +114,24 @@ function displayFields(
     subtitleLanguages.length === 0
       ? undefined
       : `${[...new Set(subtitleLanguages.map((language) => language.toUpperCase()))].join('/')} subs`,
-    result.provider === 'sktorrent' ? 'SKTorrent' : 'Webshare',
     result.seeders === undefined ? undefined : `S:${result.seeders.toString()}`,
-    result.provider === 'sktorrent' && result.cacheStatus !== 'unknown'
-      ? result.cacheStatus
+    result.provider === 'sktorrent' && result.cacheStatus === 'cached' ? 'cached' : undefined,
+    result.provider === 'sktorrent' &&
+    configuration.providers.sktorrent.playbackMode === 'torbox-only' &&
+    result.cacheStatus === 'uncached'
+      ? '⏳ TorBox download required — open once, then retry'
       : undefined,
   ].filter((value): value is string => value !== undefined && value.length > 0);
+  const provider = result.provider === 'sktorrent' ? 'SKTorrent' : 'Webshare';
+  const resolution = parsed?.resolution === 'unknown' ? undefined : parsed?.resolution;
+  const summary = [firstLine, ...details].filter(Boolean).join(' • ');
 
   return {
-    name: `CZ/SK ${parsed?.resolution ?? ''}`.trim(),
+    name: [provider, resolution].filter(Boolean).join(' '),
     title:
       mode === 'compact'
-        ? [firstLine, ...details].filter(Boolean).join(' • ')
-        : `${firstLine}\n${details.join(' • ')}`.trim(),
+        ? [result.releaseName, summary].filter(Boolean).join('\n')
+        : [result.releaseName, firstLine, details.join(' • ')].filter(Boolean).join('\n'),
   };
 }
 

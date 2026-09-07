@@ -29,6 +29,18 @@ describe('configuration HTTP API', () => {
     expect(response.body).toContain('name="viewport"');
     expect(response.body).toContain('Test TorBox');
     expect(response.body).toContain('Test TMDB');
+    expect(response.body).toContain('How to finish setup');
+    expect(response.body).toContain('data-test-status="tmdb"');
+    expect(response.body).toContain('.test-status.error{color:var(--danger)}');
+    expect(response.body).toContain("status.classList.toggle('error'");
+    expect(response.body).toContain('id="streamPreview"');
+    expect(response.body).toContain('1 is the highest priority');
+    expect(response.body).toContain('TorBox is contacted only after you open an SKTorrent source');
+    expect(response.body).toContain('name="resultLimitPerQuality"');
+    expect(response.body).toContain('perResolution=perQualityValue');
+    expect(response.body).toContain('name="safeDebug" type="checkbox"');
+    expect(response.body).toContain("safeDebug:field('safeDebug').checked");
+    expect(response.body).toContain('target="_blank" rel="noreferrer"');
     expect(response.body).not.toContain('server-held-fixture-key');
     const nonce = /<script nonce="([^"]+)">/u.exec(response.body)?.[1] ?? '';
     const script = /<script nonce="[^"]+">([\s\S]+)<\/script>/u.exec(response.body)?.[1];

@@ -2,12 +2,13 @@ import type { ConfigurationService } from './configuration-service.js';
 import type { StoredConfiguration } from './configuration-store.js';
 import { ApplicationError } from './application-error.js';
 import { createPlaybackReferenceStore } from './playback-reference-store.js';
+import { createTorrentFileStore } from './torrent-file-store.js';
+import type { SearchObserver } from './search-observability.js';
 import { createSearchStreams, type SearchStreams } from './search-streams.js';
 import { createTorboxCacheEnricher } from './torbox-cache-enricher.js';
 import {
   createTorboxPlaybackResolver,
   createTorboxPlaybackUrlFactory,
-  PlaybackResolveError,
   type TorboxPlaybackResolver,
 } from './torbox-playback.js';
 import { createTorboxPrecacheScheduler } from './torbox-precache.js';
@@ -37,10 +38,10 @@ export type ProductionIntegrationOptions = {
   configurationService: ConfigurationService;
   baseUrl: string;
   playbackSecret: Uint8Array;
-  websharePlaybackHosts?: readonly string[];
   runtimeTtlMs?: number;
   maximumRuntimes?: number;
   clock?: () => number;
+  observer?: SearchObserver;
   factories?: {
     tmdbClient?: (accessToken: string, timeoutMs: number) => TmdbClient;
     sktorrentProvider?: (
@@ -65,7 +66,11 @@ export const createProductionIntegration = (
   const maximumRuntimes = positiveInteger(options.maximumRuntimes ?? 200, 'maximum runtimes');
   const tokens = createPlayTokenService({ secret: options.playbackSecret });
   const references = createPlaybackReferenceStore();
-  const precache = createTorboxPrecacheScheduler();
+  const torrentFiles = createTorrentFileStore();
+  const precache = createTorboxPrecacheScheduler(
+    options.observer === undefined ? {} : { observer: options.observer },
+  );
+  const runtimes = new Map<string, RuntimeEntry>();
   const torboxResolver = createTorboxPlaybackResolver({
     tokens,
     references,
@@ -78,38 +83,49 @@ export const createProductionIntegration = (
     },
     createClient: (apiKey) =>
       options.factories?.torboxClient?.(apiKey, 8_000) ?? createTorboxApiClient({ apiKey }),
+    pendingPlaybackUrl: addonResourceUrl(options.baseUrl, 'status/torbox-downloading.mp4'),
     precache,
+    torrentFiles,
+    async resolvePrecacheCandidates(reference) {
+      const search = runtimes.get(reference.configId)?.search;
+      if (search?.findNextEpisodeCandidates === undefined) return [];
+      const candidates = await search.findNextEpisodeCandidates(
+        reference.media,
+        reference.precachePolicy.count,
+        {
+          signal: AbortSignal.timeout(30_000),
+          correlationId: 'precache',
+        },
+      );
+      return candidates.flatMap(({ result, matchScore }) =>
+        result.provider === 'sktorrent' ? [{ result, matchScore }] : [],
+      );
+    },
+    ...(options.observer === undefined ? {} : { observer: options.observer }),
   });
-  const webshareHosts = options.websharePlaybackHosts ?? [];
-  const webshare =
-    webshareHosts.length === 0
-      ? undefined
-      : createWebsharePlaybackAssembly({
-          baseUrl: options.baseUrl,
-          tokens,
-          allowedPlaybackHosts: webshareHosts,
-          credentials: {
-            async get(configId) {
-              const stored = await options.configurationService.getStored(configId);
-              const credential = stored?.credentials.webshare;
-              return credential === undefined ? undefined : { configId, ...credential };
-            },
-          },
-        });
-  const runtimes = new Map<string, RuntimeEntry>();
-
+  const webshare = createWebsharePlaybackAssembly({
+    baseUrl: options.baseUrl,
+    tokens,
+    credentials: {
+      async get(configId) {
+        const stored = await options.configurationService.getStored(configId);
+        const credential = stored?.credentials.webshare;
+        return credential === undefined ? undefined : { configId, ...credential };
+      },
+    },
+  });
   const playbackResolver: TorboxPlaybackResolver = {
     async inspect(token) {
+      if (references.get(token) !== undefined) return torboxResolver.inspect(token);
       const claims = tokens.verify(token);
       if (claims.provider === 'sktorrent') return torboxResolver.inspect(token);
-      if (webshare !== undefined) return webshare.resolver.inspect(token);
-      throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
+      return webshare.resolver.inspect(token);
     },
     async resolve(token, signal) {
+      if (references.get(token) !== undefined) return torboxResolver.resolve(token, signal);
       const claims = tokens.verify(token);
       if (claims.provider === 'sktorrent') return torboxResolver.resolve(token, signal);
-      if (webshare !== undefined) return webshare.resolver.resolve(token, signal);
-      throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
+      return webshare.resolver.resolve(token, signal);
     },
   };
 
@@ -122,7 +138,7 @@ export const createProductionIntegration = (
         return existing.search;
       }
       runtimes.delete(stored.id);
-      const search = assembleSearch(stored, options, references, tokens, webshare);
+      const search = assembleSearch(stored, options, references, tokens, torrentFiles, webshare);
       while (runtimes.size >= maximumRuntimes) {
         const oldest = runtimes.keys().next().value;
         if (oldest === undefined) break;
@@ -138,6 +154,7 @@ export const createProductionIntegration = (
     playbackResolver,
     invalidate(configId) {
       runtimes.delete(configId);
+      torrentFiles.deleteNamespace(configId);
     },
   };
 };
@@ -147,7 +164,8 @@ const assembleSearch = (
   options: ProductionIntegrationOptions,
   references: ReturnType<typeof createPlaybackReferenceStore>,
   tokens: ReturnType<typeof createPlayTokenService>,
-  webshare: ReturnType<typeof createWebsharePlaybackAssembly> | undefined,
+  torrentFiles: ReturnType<typeof createTorrentFileStore>,
+  webshare: ReturnType<typeof createWebsharePlaybackAssembly>,
 ): SearchStreams => {
   const tmdbCredential = stored.credentials.tmdb;
   if (tmdbCredential === undefined) {
@@ -164,11 +182,15 @@ const assembleSearch = (
     const credential = stored.credentials.sktorrent;
     if (injected !== undefined) providers.push(injected);
     else if (credential !== undefined) {
-      providers.push(createSktorrentProvider(createSktorrentSource(credential, { timeoutMs })));
+      providers.push(
+        createSktorrentProvider(createSktorrentSource(credential, { timeoutMs }), {
+          torrentFiles: { store: torrentFiles, namespace: stored.id },
+        }),
+      );
     }
   }
   const webshareCredential = stored.credentials.webshare;
-  if (stored.configuration.providers.webshare.enabled && webshare !== undefined) {
+  if (stored.configuration.providers.webshare.enabled) {
     const injected = options.factories?.webshareProvider?.(stored, timeoutMs);
     if (injected !== undefined) providers.push(injected);
     else if (webshareCredential !== undefined) {
@@ -186,6 +208,7 @@ const assembleSearch = (
       ? undefined
       : (options.factories?.torboxClient?.(torboxCredential.apiKey, timeoutMs) ??
         createTorboxApiClient({ apiKey: torboxCredential.apiKey, timeoutMs }));
+  const observer = stored.configuration.advanced?.safeDebug === true ? options.observer : undefined;
   return createSearchStreams({
     metadataResolver: new OrderedMetadataResolver([
       createTmdbMetadataSource(
@@ -195,18 +218,19 @@ const assembleSearch = (
     ]),
     providers,
     configuration: stored.configuration,
+    ...(observer === undefined ? {} : { observer }),
     ...(torboxClient === undefined
       ? {}
       : {
           cacheEnricher: createTorboxCacheEnricher(torboxClient),
+          deferCacheEnrichmentUntilPlayback: true,
           torboxPlaybackUrl: createTorboxPlaybackUrlFactory({
             baseUrl: options.baseUrl,
             configId: stored.id,
-            tokens,
             references,
           }),
         }),
-    ...(webshare === undefined || webshareCredential === undefined
+    ...(webshareCredential === undefined
       ? {}
       : { websharePlaybackUrl: webshare.urlFactory(stored.id) }),
   });
@@ -219,4 +243,10 @@ const prune = (runtimes: Map<string, RuntimeEntry>, now: number): void => {
 const positiveInteger = (value: number, name: string): number => {
   if (!Number.isSafeInteger(value) || value <= 0) throw new RangeError(`${name} must be positive`);
   return value;
+};
+
+const addonResourceUrl = (baseUrl: string, path: string): string => {
+  const base = new URL(baseUrl);
+  if (!base.pathname.endsWith('/')) base.pathname += '/';
+  return new URL(path, base).toString();
 };

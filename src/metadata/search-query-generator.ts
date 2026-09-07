@@ -1,5 +1,5 @@
 import type { MediaMetadata, SearchQuery } from '../domain/media.js';
-import { normalizeTitle } from './title-normalizer.js';
+import { normalizeTitle, titleTokens } from './title-normalizer.js';
 
 export type SearchQueryOptions = {
   includeSeasonPacks?: boolean;
@@ -9,13 +9,13 @@ export function generateSearchQueries(
   metadata: MediaMetadata,
   options: SearchQueryOptions = {},
 ): readonly SearchQuery[] {
-  const titles = uniqueTitles([
+  const primaryTitles = uniqueTitles([
     metadata.czechTitle,
     metadata.slovakTitle,
     metadata.originalTitle,
     metadata.englishTitle,
-    ...metadata.alternativeTitles,
   ]);
+  const titles = uniqueTitles([...primaryTitles, ...metadata.alternativeTitles]);
   const queries: SearchQuery[] = [];
   const seen = new Set<string>();
 
@@ -62,9 +62,42 @@ export function generateSearchQueries(
             title: variant,
             season: metadata.season,
             seasonPack: true,
+            fallback: true,
             ...(metadata.year === undefined ? {} : { year: metadata.year }),
           });
         }
+      }
+    }
+  }
+
+  if (metadata.type === 'series' && options.includeSeasonPacks === true) {
+    for (const title of primaryTitles) {
+      for (const variant of titleVariants(title)) {
+        addUniqueQuery(queries, seen, {
+          type: 'series',
+          value: variant,
+          title: variant,
+          season: metadata.season,
+          seasonPack: true,
+          fallback: true,
+          broad: true,
+          ...(metadata.year === undefined ? {} : { year: metadata.year }),
+        });
+      }
+    }
+  }
+
+  if (metadata.type === 'movie' && metadata.year !== undefined) {
+    for (const title of primaryTitles) {
+      for (const variant of titleVariants(title)) {
+        if (titleTokens(variant).length < 2) continue;
+        addUniqueQuery(queries, seen, {
+          type: 'movie',
+          value: variant,
+          title: variant,
+          year: metadata.year,
+          fallback: true,
+        });
       }
     }
   }

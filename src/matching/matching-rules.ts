@@ -3,7 +3,7 @@ import { normalizeTitle } from '../metadata/title-normalizer.js';
 import type { MatchCandidate } from './match-types.js';
 
 const releaseMetadataToken =
-  /^(?:19\d{2}|20\d{2}|s\d{1,2}(?:(?:e|-e?)\d{1,3})*|season\s+\d{1,2}|\d{1,2}x\d{1,3}|2160p?|1440p?|1080p?|720p?|576p?|480p?|4k|uhd|remux|blu\s*ray|b[dr]rip|web\s*dl|web\s*rip|hdtv|dvd|hevc|h\s*265|x265|avc|h\s*264|x264|av1)(?:\s|$)/u;
+  /^(?:19\d{2}|20\d{2}|s\d{1,2}(?:(?:e|-e?)\d{1,3})*|season\s+\d{1,2}|seasons?\s+\d{1,2}\s+\d{1,2}|serie\s+\d{1,2}(?:\s+\d{1,2})?|\d{1,2}(?:\s+\d{1,2})?\s+serie|\d{1,2}x\d{1,3}|2160p?|1440p?|1080p?|720p?|576p?|480p?|4k|uhd|remux|blu\s*ray|b[dr]rip|web\s*dl|web\s*rip|hdtv|dvd|hevc|h\s*265|x265|avc|h\s*264|x264|av1)(?:\s|$)/u;
 const unwantedContentPattern = /\b(?:sample|trailer|soundtrack|featurette|extras?)\b/iu;
 const subtitleFilePattern = /\.(?:srt|sub|ass|ssa|vtt)(?:\s|$)/iu;
 
@@ -38,7 +38,8 @@ export function matchCandidateTitle(
   if (
     releaseNames.some((releaseName) =>
       expectedTitles.some((expectedTitle) => releaseStartsWithTitle(releaseName, expectedTitle)),
-    )
+    ) ||
+    releaseNames.some((releaseName) => releaseStartsWithCombinedTitles(releaseName, expectedTitles))
   ) {
     return { matched: true, score: 60, reason: 'exact release title' };
   }
@@ -89,6 +90,21 @@ function releaseStartsWithTitle(releaseName: string, expectedTitle: string): boo
   }
 
   return releaseMetadataToken.test(normalizedRelease.slice(expectedTitle.length + 1));
+}
+
+function releaseStartsWithCombinedTitles(
+  releaseName: string,
+  expectedTitles: readonly string[],
+): boolean {
+  const parts = stripExtension(releaseName).split(/\s*\/\s*/u);
+  if (parts.length < 2 || !expectedTitles.includes(normalizeTitle(parts[0] ?? ''))) {
+    return false;
+  }
+  return parts
+    .slice(1)
+    .some((part) =>
+      expectedTitles.some((expectedTitle) => releaseStartsWithTitle(part, expectedTitle)),
+    );
 }
 
 function hasUnrecognizedTitleSuffix(releaseName: string, expectedTitle: string): boolean {

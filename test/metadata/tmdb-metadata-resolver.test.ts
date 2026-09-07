@@ -25,6 +25,26 @@ describe('TMDB metadata source', () => {
       ],
       expected: { originalTitle: 'Severne kralovstvo', year: 2011 },
     },
+    {
+      request: { type: 'series' as const, id: 'tmdb:1399', season: 1, episode: 2 },
+      files: [
+        'series-details.json',
+        'series-sk.json',
+        'series-cs.json',
+        'series-alternative-titles.json',
+      ],
+      expected: { originalTitle: 'Severne kralovstvo', year: 2011 },
+    },
+    {
+      request: { type: 'series' as const, id: 'tvdb:83757', season: 1, episode: 2 },
+      files: [
+        'find-series.json',
+        'series-sk.json',
+        'series-cs.json',
+        'series-alternative-titles.json',
+      ],
+      expected: { originalTitle: 'Severne kralovstvo', year: 2011 },
+    },
   ])(
     'resolves original, localized and bounded alternative titles',
     async ({ request, files, expected }) => {

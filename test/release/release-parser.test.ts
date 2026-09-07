@@ -49,6 +49,10 @@ describe('release parser', () => {
     });
   });
 
+  it.each(['FullHD', 'Full HD', 'FHD'])('maps %s to 1080p', (marker) => {
+    expect(parseRelease(`Film.${marker}.WEB-DL`).resolution).toBe('1080p');
+  });
+
   it('does not report technical hyphenated tags as release groups', () => {
     expect(parseRelease('Film.1080p.WEB-DL').releaseGroup).toBeUndefined();
     expect(parseRelease('Film.1080p.DTS-HD-MA').audioCodecs).toEqual(['dts-hd-ma']);

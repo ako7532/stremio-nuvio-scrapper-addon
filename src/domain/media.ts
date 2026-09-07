@@ -30,6 +30,8 @@ type SearchQueryBase = {
   value: string;
   title: string;
   year?: number;
+  fallback?: boolean;
+  broad?: boolean;
 };
 
 export type SearchQuery =

@@ -9,19 +9,22 @@ const xmlResponse = (body: string): Response =>
   new Response(body, { headers: { 'content-type': 'text/xml; charset=UTF-8' } });
 
 describe('Webshare API client', () => {
-  it('constructs a bounded public video search POST', async () => {
+  it('constructs a bounded authenticated video search POST', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValue(xmlResponse('<response><status>OK</status><total>0</total></response>'));
     const api = createWebshareApiClient({ fetch: fetchMock });
 
-    await expect(api.search('Sintel 2010', 20)).resolves.toEqual([]);
+    await expect(api.search('Sintel 2010', 20, 'private-token')).resolves.toEqual([]);
 
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe('https://webshare.cz/api/search/');
+    expect(url).not.toContain('private-token');
     expect(init).toMatchObject({ method: 'POST', credentials: 'omit', redirect: 'error' });
     expect(init?.headers).not.toHaveProperty('cookie');
-    expect(formBody(init)).toBe('what=Sintel+2010&sort=rating&limit=20&offset=0&category=video');
+    expect(formBody(init)).toBe(
+      'what=Sintel+2010&sort=rating&limit=20&offset=0&category=video&wst=private-token',
+    );
   });
 
   it('constructs the documented salt and login requests without putting credentials in URLs', async () => {
@@ -74,7 +77,7 @@ describe('Webshare API client', () => {
       .mockResolvedValue(new Response('not xml', { headers: { 'content-type': 'text/plain' } }));
     const api = createWebshareApiClient({ fetch: fetchMock, maximumResponseBytes: 4 });
 
-    const error = await api.search('Sintel', 1).catch((reason: unknown) => reason);
+    const error = await api.search('Sintel', 1, 'private-token').catch((reason: unknown) => reason);
 
     expect(error).toBeInstanceOf(WebshareTransportError);
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -97,12 +100,12 @@ describe('Webshare API client', () => {
     );
     try {
       const api = createWebshareApiClient({ fetch: fetchMock, timeoutMs: 50 });
-      const timeout = api.search('Sintel', 1);
+      const timeout = api.search('Sintel', 1, 'private-token');
       await vi.advanceTimersByTimeAsync(50);
       await expect(timeout).rejects.toMatchObject({ kind: 'timeout' });
 
       const controller = new AbortController();
-      const cancelled = api.search('Sintel', 1, controller.signal);
+      const cancelled = api.search('Sintel', 1, 'private-token', controller.signal);
       controller.abort();
       await expect(cancelled).rejects.toMatchObject({ kind: 'cancelled' });
     } finally {

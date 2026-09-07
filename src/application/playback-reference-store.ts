@@ -25,8 +25,10 @@ export type PlaybackReference = {
   configId: string;
   result: TorrentProviderResult;
   media: MediaRequest;
+  allowUncached: boolean;
   precacheCandidates: readonly PrecacheCandidate[];
   precachePolicy: PlaybackPrecachePolicy;
+  safeDebug?: boolean;
   expiresAt: number;
 };
 
@@ -44,7 +46,7 @@ export type PlaybackReferenceStoreOptions = {
   maximumEntries?: number;
 };
 
-const DEFAULT_TTL_MS = 10 * 60 * 1_000;
+const DEFAULT_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_MAXIMUM_ENTRIES = 2_000;
 
 export const createPlaybackReferenceStore = (

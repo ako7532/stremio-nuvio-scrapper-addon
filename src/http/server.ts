@@ -1,6 +1,11 @@
 import { randomBytes } from 'node:crypto';
 
-import Fastify, { LogController, type FastifyInstance, type FastifyReply } from 'fastify';
+import Fastify, {
+  LogController,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+} from 'fastify';
 import { z } from 'zod';
 
 import {
@@ -27,6 +32,7 @@ import { TorboxTransportError } from '../providers/torbox/torbox-api-client.js';
 import { PlayTokenError } from '../security/play-token.js';
 import { configurePage } from './configure-page.js';
 import { manifest } from './manifest.js';
+import { torboxDownloadingVideo } from './torbox-downloading-video.js';
 
 const streamParamsSchema = z.object({
   type: z.enum(mediaTypes),
@@ -74,6 +80,10 @@ const corsRoutes = new Set([
   '/:configId/manifest.json',
   '/:configId/stream/:type/:id.json',
   '/play/:token',
+  '/play/:token/:filename',
+  '/download/:token',
+  '/download/:token/:filename',
+  '/status/torbox-downloading.mp4',
 ]);
 
 export type ServerOptions = {
@@ -313,31 +323,74 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   server.route({
     method: ['GET', 'HEAD'],
-    url: '/play/:token',
-    async handler(request, reply) {
-      const parsed = playParamsSchema.safeParse(request.params);
-      if (!parsed.success || options.torboxPlaybackResolver === undefined) {
-        return reply.code(404).send({ error: 'Playback reference not found' });
+    url: '/status/torbox-downloading.mp4',
+    handler(request, reply) {
+      void reply
+        .type('video/mp4')
+        .header('accept-ranges', 'bytes')
+        .header('cache-control', 'public, max-age=86400');
+      if (request.method === 'HEAD') {
+        return reply.header('content-length', String(torboxDownloadingVideo.length)).send();
       }
-      if (!consumeRateLimit(rateLimiters.playback, request.ip, reply)) return;
-      const controller = new AbortController();
-      request.raw.once('aborted', () => {
-        controller.abort();
-      });
-      try {
-        if (request.method === 'HEAD') {
-          await options.torboxPlaybackResolver.inspect(parsed.data.token);
-          return await reply.code(204).send();
-        }
-        const playback = await options.torboxPlaybackResolver.resolve(
-          parsed.data.token,
-          controller.signal,
-        );
-        return await reply.code(302).header('location', playback.url).send();
-      } catch (error) {
-        return sendPlaybackError(reply, error);
+      const range = parseVideoRange(request.headers.range, torboxDownloadingVideo.length);
+      if (range === 'invalid') {
+        return reply
+          .code(416)
+          .header('content-range', `bytes */${String(torboxDownloadingVideo.length)}`)
+          .send();
       }
+      if (range === undefined) {
+        return reply
+          .header('content-length', String(torboxDownloadingVideo.length))
+          .send(torboxDownloadingVideo);
+      }
+      const body = torboxDownloadingVideo.subarray(range.start, range.end + 1);
+      return reply
+        .code(206)
+        .header(
+          'content-range',
+          `bytes ${String(range.start)}-${String(range.end)}/${String(torboxDownloadingVideo.length)}`,
+        )
+        .header('content-length', String(body.length))
+        .send(body);
     },
+  });
+
+  const playbackHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    const parsed = playParamsSchema.safeParse(request.params);
+    if (!parsed.success || options.torboxPlaybackResolver === undefined) {
+      return reply.code(404).send({ error: 'Playback reference not found' });
+    }
+    if (!consumeRateLimit(rateLimiters.playback, request.ip, reply)) return;
+    const controller = new AbortController();
+    request.raw.once('aborted', () => {
+      controller.abort();
+    });
+    try {
+      if (request.method === 'HEAD') {
+        await options.torboxPlaybackResolver.inspect(parsed.data.token);
+        return await reply.code(204).send();
+      }
+      const playback = await options.torboxPlaybackResolver.resolve(
+        parsed.data.token,
+        controller.signal,
+      );
+      return await reply.code(302).header('location', playback.url).send();
+    } catch (error) {
+      return sendPlaybackError(reply, error);
+    }
+  };
+  server.route({ method: ['GET', 'HEAD'], url: '/play/:token', handler: playbackHandler });
+  server.route({
+    method: ['GET', 'HEAD'],
+    url: '/play/:token/:filename',
+    handler: playbackHandler,
+  });
+  server.route({ method: ['GET', 'HEAD'], url: '/download/:token', handler: playbackHandler });
+  server.route({
+    method: ['GET', 'HEAD'],
+    url: '/download/:token/:filename',
+    handler: playbackHandler,
   });
 
   return server;
@@ -462,9 +515,9 @@ function parseMediaRequest(
   id: string,
 ): MediaRequest | undefined {
   if (type === 'movie') {
-    return /^tt\d+$/u.test(id) ? { type, id } : undefined;
+    return /^(?:tt\d+|tmdb:\d{1,10})$/u.test(id) ? { type, id } : undefined;
   }
-  const match = /^(tt\d+):(\d+):(\d+)$/u.exec(id);
+  const match = /^((?:tt\d+|tmdb:\d{1,10}|tvdb[:-]\d{1,10}))(?::official)?:(\d+):(\d+)$/u.exec(id);
   if (match === null) return undefined;
   const season = Number(match[2]);
   const episode = Number(match[3]);
@@ -477,4 +530,25 @@ function parseMediaRequest(
     return undefined;
   }
   return { type, id: match[1] ?? '', season, episode };
+}
+
+function parseVideoRange(
+  value: string | undefined,
+  length: number,
+): { start: number; end: number } | 'invalid' | undefined {
+  if (value === undefined) return undefined;
+  const match = /^bytes=(\d+)-(\d*)$/u.exec(value);
+  if (match === null) return 'invalid';
+  const start = Number(match[1]);
+  const requestedEnd = match[2] === '' ? length - 1 : Number(match[2]);
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(requestedEnd) ||
+    start < 0 ||
+    start >= length ||
+    requestedEnd < start
+  ) {
+    return 'invalid';
+  }
+  return { start, end: Math.min(requestedEnd, length - 1) };
 }

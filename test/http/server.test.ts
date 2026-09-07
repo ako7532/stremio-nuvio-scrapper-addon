@@ -25,7 +25,7 @@ describe('Stremio HTTP contract', () => {
     expect(response.json()).toMatchObject({
       resources: ['stream'],
       types: ['movie', 'series'],
-      idPrefixes: ['tt'],
+      idPrefixes: ['tt', 'tmdb:', 'tvdb:', 'tvdb-'],
       behaviorHints: {
         configurable: true,
         configurationRequired: true,
@@ -102,6 +102,27 @@ describe('Stremio HTTP contract', () => {
     });
   });
 
+  it.each([
+    ['tmdb:46612:1:1', 'tmdb:46612'],
+    ['tvdb:83757:1:1', 'tvdb:83757'],
+    ['tvdb:83757:official:1:1', 'tvdb:83757'],
+    ['tvdb-83757:1:1', 'tvdb-83757'],
+  ])('parses external series identifier %s', async (id, expectedId) => {
+    const search = vi.fn<SearchStreams['search']>().mockResolvedValue([]);
+    const server = buildServer({ searchStreams: { search } });
+    servers.push(server);
+
+    const response = await server.inject({ method: 'GET', url: `/stream/series/${id}.json` });
+
+    expect(response.statusCode).toBe(200);
+    expect(search.mock.calls[0]?.[0]).toEqual({
+      type: 'series',
+      id: expectedId,
+      season: 1,
+      episode: 1,
+    });
+  });
+
   it('rejects a series identifier without season and episode components', async () => {
     const server = buildServer();
     servers.push(server);
@@ -154,13 +175,54 @@ describe('Stremio HTTP contract', () => {
     const server = buildServer({ torboxPlaybackResolver: { inspect, resolve } });
     servers.push(server);
 
-    const head = await server.inject({ method: 'HEAD', url: '/play/v1.fixture.token.signature' });
-    const get = await server.inject({ method: 'GET', url: '/play/v1.fixture.token.signature' });
+    const head = await server.inject({
+      method: 'HEAD',
+      url: '/play/v1.fixture.token.signature/Fixture.Show.S01E02.mkv',
+    });
+    const legacyHead = await server.inject({
+      method: 'HEAD',
+      url: '/play/v1.fixture.token.signature',
+    });
+    const get = await server.inject({
+      method: 'GET',
+      url: '/play/v1.fixture.token.signature/Fixture.Show.S01E02.mkv',
+    });
+    const downloadHead = await server.inject({
+      method: 'HEAD',
+      url: '/download/v1.fixture.token.signature/Fixture.Show.S01E02.mkv',
+    });
 
     expect(head.statusCode).toBe(204);
-    expect(inspect).toHaveBeenCalledOnce();
+    expect(legacyHead.statusCode).toBe(204);
+    expect(downloadHead.statusCode).toBe(204);
+    expect(inspect).toHaveBeenCalledTimes(3);
+    expect(inspect).toHaveBeenNthCalledWith(1, 'v1.fixture.token.signature');
+    expect(inspect).toHaveBeenNthCalledWith(2, 'v1.fixture.token.signature');
+    expect(inspect).toHaveBeenNthCalledWith(3, 'v1.fixture.token.signature');
     expect(resolve).toHaveBeenCalledOnce();
     expect(get.statusCode).toBe(302);
     expect(get.headers.location).toBe('https://cdn.torbox.app/fixture-video');
+  });
+
+  it('serves the TorBox downloading video with byte-range support', async () => {
+    const server = buildServer();
+    servers.push(server);
+
+    const full = await server.inject({
+      method: 'HEAD',
+      url: '/status/torbox-downloading.mp4',
+    });
+    const partial = await server.inject({
+      method: 'GET',
+      url: '/status/torbox-downloading.mp4',
+      headers: { range: 'bytes=0-99' },
+    });
+
+    expect(full.statusCode).toBe(200);
+    expect(full.headers['content-type']).toContain('video/mp4');
+    expect(Number(full.headers['content-length'])).toBeGreaterThan(10_000);
+    expect(partial.statusCode).toBe(206);
+    expect(partial.headers['content-range']).toMatch(/^bytes 0-99\/\d+$/u);
+    expect(partial.rawPayload).toHaveLength(100);
   });
 });

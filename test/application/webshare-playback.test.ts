@@ -28,7 +28,6 @@ describe('Webshare playback', () => {
       credentials: {
         get: vi.fn().mockResolvedValue({ configId: 'configuration-id-1234', ...credential }),
       },
-      allowedPlaybackHosts: ['media.example.test'],
       resolvePlayback,
     });
     const url = assembly.urlFactory('configuration-id-1234')(result, {
@@ -53,7 +52,7 @@ describe('Webshare playback', () => {
     expect(url).not.toContain(result.fileId);
   });
 
-  it('rejects playback links outside the exact allowlist', async () => {
+  it('accepts a changing HTTPS playback host returned by Webshare', async () => {
     const assembly = createWebsharePlaybackAssembly({
       baseUrl: 'https://addon.example/',
       tokens: createPlayTokenService({ secret: 'fixture-secret-with-at-least-32-bytes' }),
@@ -64,7 +63,6 @@ describe('Webshare playback', () => {
           password: 'fixture-password',
         }),
       },
-      allowedPlaybackHosts: ['media.example.test'],
       resolvePlayback: vi.fn().mockResolvedValue('https://sub.media.example.test/temporary'),
     });
     const token =
@@ -74,8 +72,41 @@ describe('Webshare playback', () => {
         .split('/')
         .at(-1) ?? '';
 
-    await expect(assembly.resolver.resolve(token)).rejects.toMatchObject({
-      kind: 'invalid-provider-url',
+    await expect(assembly.resolver.resolve(token)).resolves.toMatchObject({
+      url: 'https://sub.media.example.test/temporary',
     });
+  });
+
+  it('still rejects non-HTTPS playback URLs and URLs containing credentials', async () => {
+    for (const playbackUrl of [
+      'http://media.example.test/temporary',
+      'https://user:password@media.example.test/temporary',
+    ]) {
+      const assembly = createWebsharePlaybackAssembly({
+        baseUrl: 'https://addon.example/',
+        tokens: createPlayTokenService({ secret: 'fixture-secret-with-at-least-32-bytes' }),
+        credentials: {
+          get: vi.fn().mockResolvedValue({
+            configId: 'configuration-id-1234',
+            username: 'fixture-user',
+            password: 'fixture-password',
+          }),
+        },
+        resolvePlayback: vi.fn().mockResolvedValue(playbackUrl),
+      });
+      const token =
+        new URL(
+          assembly.urlFactory('configuration-id-1234')(result, {
+            type: 'movie',
+            id: 'tt0000011',
+          }),
+        ).pathname
+          .split('/')
+          .at(-1) ?? '';
+
+      await expect(assembly.resolver.resolve(token)).rejects.toMatchObject({
+        kind: 'invalid-provider-url',
+      });
+    }
   });
 });

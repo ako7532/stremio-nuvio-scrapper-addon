@@ -39,6 +39,7 @@ export type WebshareApiClient = {
   search(
     query: string,
     limit: number,
+    sessionToken: string,
     signal?: AbortSignal,
   ): Promise<readonly WebshareSearchResult[]>;
   getFileInfo(fileId: string, signal?: AbortSignal): Promise<WebshareFileInfo>;
@@ -155,7 +156,7 @@ export const createWebshareApiClient = (
         ),
       );
     },
-    async search(query, limit, signal) {
+    async search(query, limit, sessionToken, signal) {
       return parseWebshareSearch(
         await post(
           'search',
@@ -167,6 +168,7 @@ export const createWebshareApiClient = (
             category: 'video',
           },
           signal,
+          sessionToken,
         ),
       );
     },

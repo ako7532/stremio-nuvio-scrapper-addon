@@ -47,6 +47,16 @@ describe('movie matcher', () => {
     ).toMatchObject({ matched: false, reasons: ['title mismatch'] });
   });
 
+  it('does not treat a slash-separated sequel as a localized title pair', () => {
+    expect(
+      matchMovie(metadata, {
+        mediaType: 'movie',
+        title: 'Duna / Dune Part Two',
+        releaseName: 'Duna / Dune Part Two 2024 1080p WEB-DL',
+      }),
+    ).toMatchObject({ matched: false, reasons: ['title mismatch'] });
+  });
+
   it('uses the release filename to reject a sequel even when the provider title is misleading', () => {
     expect(
       matchMovie(metadata, {

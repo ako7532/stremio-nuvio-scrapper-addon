@@ -16,6 +16,8 @@ export type TorboxTorrent = {
   hash: string;
   name: string;
   downloadState: string;
+  downloadFinished?: boolean;
+  downloadPresent?: boolean;
   files: readonly TorboxTorrentFile[];
 };
 

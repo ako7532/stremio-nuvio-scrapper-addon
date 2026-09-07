@@ -14,6 +14,8 @@ export type TmdbAlternativeTitle = { title: string; country?: string };
 export type TmdbClient = {
   validateAuthentication(signal?: AbortSignal): Promise<void>;
   findByImdbId(request: MediaRequest, signal?: AbortSignal): Promise<TmdbMediaRecord | undefined>;
+  findByTvdbId(request: MediaRequest, signal?: AbortSignal): Promise<TmdbMediaRecord | undefined>;
+  getById(type: MediaRequest['type'], id: number, signal?: AbortSignal): Promise<TmdbMediaRecord>;
   getLocalizedTitle(
     type: MediaRequest['type'],
     id: number,
@@ -161,33 +163,20 @@ export const createTmdbClient = (options: TmdbClientOptions): TmdbClient => {
       );
     },
     async findByImdbId(media, signal) {
-      const response = parse(
-        findSchema,
-        await request(
-          `/3/find/${encodeURIComponent(media.id)}?external_source=imdb_id&language=en-US`,
-          signal,
-        ),
+      return findExternal(media, 'imdb_id', signal);
+    },
+    async findByTvdbId(media, signal) {
+      return findExternal(media, 'tvdb_id', signal);
+    },
+    async getById(type, id, signal) {
+      const mediaId = positiveInteger(id, 'media ID');
+      const response = await request(
+        `/3/${type === 'movie' ? 'movie' : 'tv'}/${String(mediaId)}?language=en-US`,
+        signal,
       );
-      if (media.type === 'movie') {
-        const result = response.movie_results[0];
-        return result === undefined
-          ? undefined
-          : {
-              id: result.id,
-              title: result.title,
-              originalTitle: result.original_title,
-              ...yearFrom(result.release_date),
-            };
-      }
-      const result = response.tv_results[0];
-      return result === undefined
-        ? undefined
-        : {
-            id: result.id,
-            title: result.name,
-            originalTitle: result.original_name,
-            ...yearFrom(result.first_air_date),
-          };
+      return type === 'movie'
+        ? movieRecord(parse(movieSchema, response))
+        : seriesRecord(parse(seriesSchema, response));
     },
     async getLocalizedTitle(type, id, language, signal) {
       const path = `/3/${type === 'movie' ? 'movie' : 'tv'}/${String(positiveInteger(id, 'media ID'))}?language=${encodeURIComponent(normalizeLanguage(language))}`;
@@ -209,11 +198,48 @@ export const createTmdbClient = (options: TmdbClientOptions): TmdbClient => {
       }));
     },
   };
+
+  async function findExternal(
+    media: MediaRequest,
+    externalSource: 'imdb_id' | 'tvdb_id',
+    signal?: AbortSignal,
+  ): Promise<TmdbMediaRecord | undefined> {
+    const externalId =
+      externalSource === 'imdb_id' ? media.id : /^tvdb[:-](\d{1,10})$/u.exec(media.id)?.[1];
+    if (externalId === undefined) return undefined;
+    const response = parse(
+      findSchema,
+      await request(
+        `/3/find/${encodeURIComponent(externalId)}?external_source=${externalSource}&language=en-US`,
+        signal,
+      ),
+    );
+    if (media.type === 'movie') {
+      const result = response.movie_results[0];
+      return result === undefined ? undefined : movieRecord(result);
+    }
+    const result = response.tv_results[0];
+    return result === undefined ? undefined : seriesRecord(result);
+  }
 };
+
+const movieRecord = (value: z.infer<typeof movieSchema>): TmdbMediaRecord => ({
+  id: value.id,
+  title: value.title,
+  originalTitle: value.original_title,
+  ...yearFrom(value.release_date),
+});
+
+const seriesRecord = (value: z.infer<typeof seriesSchema>): TmdbMediaRecord => ({
+  id: value.id,
+  title: value.name,
+  originalTitle: value.original_name,
+  ...yearFrom(value.first_air_date),
+});
 
 const allowedUrl = (path: string): URL => {
   if (
-    !/^\/3\/(?:authentication|find\/tt\d+|(?:movie|tv)\/\d+(?:\/alternative_titles)?)(?:\?[^#]*)?$/u.test(
+    !/^\/3\/(?:authentication|find\/(?:tt\d+|\d{1,10})|(?:movie|tv)\/\d{1,10}(?:\/alternative_titles)?)(?:\?[^#]*)?$/u.test(
       path,
     )
   ) {

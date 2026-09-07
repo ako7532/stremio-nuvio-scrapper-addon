@@ -28,7 +28,8 @@ provider results -> normalize -> parse -> match -> deduplicate -> hard filters
 The `SearchStreams` use case runs enabled providers in parallel and processes each provider's query
 variants sequentially. Every query and provider settles independently, so one failure does not discard
 successful results. Cancellation is the exception and propagates to the caller. Matching happens before
-provider-specific deduplication; hard filters run before an optional cache enricher; ranking is a
+provider-specific deduplication; hard filters run before an optional cache enricher; production stream
+search defers TorBox enrichment until playback, while post-playback precache still uses it; ranking is a
 lexicographic comparison of the configured factors with explicit identity tie-breakers. Per-resolution
 limits are applied before the total limit.
 The total limit also has a server-side cap of 100 results.
@@ -39,8 +40,9 @@ TMDB resolver, enabled provider adapters, caches, budgets, and playback URL fact
 revocation discard the searchable runtime while playback still reloads current credentials server-side.
 
 Stream formatting is the last pipeline stage. Direct SKTorrent mode emits a verified `infoHash`;
-TorBox-only results require successful cache enrichment and an addon-owned play-URL factory. Unknown
-cache state is never treated as uncached; uncached results appear only when explicitly configured.
+TorBox-only results require an addon-owned play-URL factory. Production search does not contact TorBox
+or hide a result based on cache state; the selected result is checked or added only after playback GET,
+according to the user's uncached-torrent setting.
 Multi-file series torrents are accepted only through TorBox, where playback selects the requested
 episode from the provider-confirmed file list. Webshare results enter ranking and limits only when an addon-owned play-URL
 factory is available. Formatting accepts only an HTTPS URL from that factory and never asks Webshare
@@ -62,18 +64,19 @@ and redirects only to an allowlisted TorBox HTTPS host. In-flight and short-live
 are shared by token, making repeated Range requests idempotent. Failed resolution is retryable and first
 checks the account again, preventing another torrent creation after an earlier partial success.
 
-The playback reference retains the already filtered and deterministically ranked TorBox candidates and
-a bounded snapshot of the user's precache policy. The background scheduler excludes cached, unknown,
-selected, duplicate, low-score, disallowed-quality, unsafe-size, low-seeder, non-preferred-language,
-and already-accounted torrents. Per-user serialization, an hourly create budget, idempotent reference
-and hash tracking, and provider `Retry-After` backoff prevent mutation bursts. Precache failures are
-contained and never delay or fail the selected redirect. Alternative-release and next-episode
-extensions remain out of scope.
+The playback reference retains a bounded snapshot of the user's precache policy. After successful
+series playback, background discovery searches the configured number of following episodes in the same
+season and selects at most one suitable torrent per episode, preferring single episodes over multi-part
+releases and season packs. The scheduler excludes unknown, selected, duplicate, low-score,
+disallowed-quality, unsafe-size, low-seeder, non-preferred-language, and already-accounted torrents.
+Per-user serialization, an hourly create budget, idempotent reference and hash tracking, and provider
+`Retry-After` backoff prevent mutation bursts. Precache failures are contained and never delay or fail
+the selected redirect.
 
 Webshare uses a separate expiring server-side file reference under the same provider-discriminated token
 service. HEAD validates only the reference and current configuration. GET alone authenticates, requests
-`file_link`, and accepts a redirect target only when its HTTPS hostname exactly matches the configured
-allowlist. Successful resolutions are shared briefly for idempotency.
+`file_link`, and accepts only a credential-free HTTPS redirect target. Successful resolutions are shared
+briefly for idempotency.
 
 Provider credentials stay in encrypted server-side configuration storage and never appear in manifest, stream, play URLs, frontend state, or logs.
 
@@ -161,7 +164,8 @@ metadata work. The production runtime connects eligible results to the addon-own
 
 Credential-backed validation confirms that resolved Webshare HTTPS links support HEAD and byte-range
 GET requests. The provider returned the media response directly during the probe; the addon-owned
-resolver uses a redirect so the temporary provider URL remains outside Stremio search responses.
+resolver accepts only a credential-free HTTPS URL and redirects so the temporary provider URL remains
+outside Stremio search responses.
 
 ## TMDB metadata boundary
 
