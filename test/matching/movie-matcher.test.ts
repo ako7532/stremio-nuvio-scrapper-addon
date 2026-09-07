@@ -37,6 +37,60 @@ describe('movie matcher', () => {
     });
   });
 
+  it('distinguishes a number in the movie title from the release year', () => {
+    const numberedTitle: MediaMetadata = {
+      type: 'movie',
+      id: 'tt1856101',
+      originalTitle: 'Blade Runner 2049',
+      alternativeTitles: ['Blade Runner 2'],
+      year: 2017,
+    };
+
+    expect(
+      matchMovie(numberedTitle, {
+        mediaType: 'movie',
+        title: 'Blade Runner 2049 (2017)',
+        releaseName: 'Blade Runner 2049 (2017) 2160p BluRay HEVC',
+      }),
+    ).toMatchObject({ matched: true, score: 80, reasons: ['exact release title', 'year match'] });
+    expect(
+      matchMovie(numberedTitle, {
+        mediaType: 'movie',
+        title: 'Blade Runner 2049 (1982)',
+        releaseName: 'Blade Runner 2049 (1982) 1080p BluRay',
+      }),
+    ).toMatchObject({ matched: false, reasons: ['exact release title', 'year mismatch'] });
+    expect(
+      matchMovie(numberedTitle, {
+        mediaType: 'movie',
+        title: 'Blade-Runner2049(2017).mp4',
+        releaseName: 'Blade-Runner2049(2017).mp4',
+      }),
+    ).toMatchObject({ matched: true, reasons: ['exact release title', 'year match'] });
+  });
+
+  it.each([
+    { title: '1917', releaseYear: 2019 },
+    { title: '2001: A Space Odyssey', releaseYear: 1968 },
+  ])('handles a year-like number in $title', ({ title, releaseYear }) => {
+    expect(
+      matchMovie(
+        {
+          type: 'movie',
+          id: 'tt-numbered-title',
+          originalTitle: title,
+          alternativeTitles: [],
+          year: releaseYear,
+        },
+        {
+          mediaType: 'movie',
+          title: `${title} (${String(releaseYear)})`,
+          releaseName: `${title} (${String(releaseYear)}) 1080p BluRay`,
+        },
+      ),
+    ).toMatchObject({ matched: true, reasons: ['exact release title', 'year match'] });
+  });
+
   it('rejects sequels that merely start with the requested title', () => {
     expect(
       matchMovie(metadata, {

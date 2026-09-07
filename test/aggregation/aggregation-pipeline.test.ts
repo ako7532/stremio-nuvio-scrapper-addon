@@ -116,6 +116,58 @@ describe('aggregation pipeline stages', () => {
     ).toEqual(['a'.repeat(40), 'c'.repeat(40)]);
   });
 
+  it('keeps one eligible result from each provider before filling bounded quality slots', () => {
+    const sktorrent4k = [
+      ranked(torrent('a'.repeat(40), 'Movie.2160p.WEB-DL.SK.HEVC.mkv', 30), 90),
+      ranked(torrent('b'.repeat(40), 'Movie.2160p.WEB-DL.SK.HEVC.mkv', 20), 90),
+      ranked(torrent('c'.repeat(40), 'Movie.2160p.WEB-DL.SK.HEVC.mkv', 10), 90),
+    ];
+    const webshare4k = ranked(file('webshare-file', 'Movie.2160p.WEB-DL.CZ.mkv'), 80);
+
+    const results = limitResults([...sktorrent4k, webshare4k], {
+      total: 20,
+      perResolution: { '2160p': 3 },
+    });
+
+    expect(results.map(({ result }) => result.provider)).toEqual([
+      'sktorrent',
+      'sktorrent',
+      'webshare',
+    ]);
+    expect(results.map(({ result }) => result.id)).not.toContain('c'.repeat(40));
+  });
+
+  it('keeps strict limits when there is not enough capacity for every provider', () => {
+    const sktorrent4k = ranked(torrent('a'.repeat(40), 'Movie.2160p.WEB-DL.SK.HEVC.mkv', 30), 90);
+    const webshare4k = ranked(file('webshare-file', 'Movie.2160p.WEB-DL.CZ.mkv'), 80);
+
+    expect(
+      limitResults([sktorrent4k, webshare4k], {
+        total: 1,
+        perResolution: { '2160p': 1 },
+      }),
+    ).toEqual([sktorrent4k]);
+  });
+
+  it('uses another quality when needed to represent both providers within quality caps', () => {
+    const topSktorrent4k = ranked(
+      torrent('a'.repeat(40), 'Movie.2160p.WEB-DL.SK.HEVC.mkv', 30),
+      90,
+    );
+    const sktorrent1080p = ranked(
+      torrent('b'.repeat(40), 'Movie.1080p.WEB-DL.SK.HEVC.mkv', 20),
+      90,
+    );
+    const webshare4k = ranked(file('webshare-file', 'Movie.2160p.WEB-DL.CZ.mkv'), 80);
+
+    const results = limitResults([topSktorrent4k, sktorrent1080p, webshare4k], {
+      total: 2,
+      perResolution: { '2160p': 1, '1080p': 1 },
+    });
+
+    expect(results).toEqual([sktorrent1080p, webshare4k]);
+  });
+
   it('enforces the server result cap and rejects invalid limits', () => {
     const candidate = ranked(torrent('a'.repeat(40), 'Movie.1080p.mkv'), 90);
 

@@ -24,7 +24,7 @@ export function matchMovie(metadata: MediaMetadata, candidate: MatchCandidate): 
 
   let score = titleMatch.score;
   const reasons = titleMatch.reason === undefined ? [] : [titleMatch.reason];
-  const year = candidateYear(candidate);
+  const year = candidateYear(candidate, titleYears(metadata));
 
   if (metadata.year !== undefined && year !== undefined) {
     if (metadata.year === year) {
@@ -38,4 +38,21 @@ export function matchMovie(metadata: MediaMetadata, candidate: MatchCandidate): 
 
   const finalScore = clampScore(score);
   return { matched: finalScore >= minimumMovieScore, score: finalScore, reasons };
+}
+
+function titleYears(metadata: MediaMetadata): ReadonlySet<number> {
+  const titles = [
+    metadata.originalTitle,
+    metadata.englishTitle,
+    metadata.czechTitle,
+    metadata.slovakTitle,
+    ...metadata.alternativeTitles,
+  ];
+  return new Set(
+    titles.flatMap((title) =>
+      title === undefined
+        ? []
+        : [...title.matchAll(/\b(?:19|20)\d{2}\b/gu)].map((match) => Number(match[0])),
+    ),
+  );
 }

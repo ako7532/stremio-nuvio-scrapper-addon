@@ -52,15 +52,22 @@ export function hasUnwantedContent(candidate: MatchCandidate): boolean {
   return unwantedContentPattern.test(value) || subtitleFilePattern.test(value);
 }
 
-export function candidateYear(candidate: MatchCandidate): number | undefined {
+export function candidateYear(
+  candidate: MatchCandidate,
+  ignoredYears: ReadonlySet<number> = new Set(),
+): number | undefined {
   if (candidate.year !== undefined) {
     return candidate.year;
   }
 
-  const match = /\b(?:19|20)\d{2}\b/u.exec(
-    `${candidate.title} ${candidate.releaseName} ${candidate.filename ?? ''}`,
-  );
-  return match === null ? undefined : Number(match[0]);
+  for (const value of [candidate.title, candidate.releaseName, candidate.filename]) {
+    if (value === undefined) continue;
+    for (const match of value.matchAll(/\b(?:19|20)\d{2}\b/gu)) {
+      const year = Number(match[0]);
+      if (!ignoredYears.has(year)) return year;
+    }
+  }
+  return undefined;
 }
 
 export function clampScore(score: number): number {
@@ -82,8 +89,11 @@ function uniqueExpectedTitles(metadata: MediaMetadata): readonly string[] {
 
 function titleMatchVariants(value: string): readonly string[] {
   const normalized = normalizeTitle(value);
-  if (!/[’']/u.test(value)) return [normalized];
-  return [normalized, normalizeTitle(value.replace(/[’']/gu, ' '))];
+  const variants = [normalized];
+  if (/[’']/u.test(value)) variants.push(normalizeTitle(value.replace(/[’']/gu, ' ')));
+  const compactNumber = normalized.replace(/([\p{L}\p{M}]{3,}) ((?:19|20)\d{2})$/u, '$1$2');
+  if (compactNumber !== normalized) variants.push(compactNumber);
+  return variants;
 }
 
 function releaseStartsWithTitle(releaseName: string, expectedTitle: string): boolean {

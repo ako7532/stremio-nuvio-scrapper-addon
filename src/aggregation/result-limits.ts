@@ -11,17 +11,56 @@ export function limitResults(
   for (const maximum of Object.values(limits.perResolution)) {
     assertNonNegativeInteger(maximum, 'per-resolution result limit');
   }
-  const resolutionCounts: Partial<Record<Resolution, number>> = {};
-  const limited = rankedResults.filter(({ result }) => {
-    const resolution = result.parsed?.resolution ?? 'unknown';
-    const maximum = limits.perResolution[resolution];
-    const count = resolutionCounts[resolution] ?? 0;
-    if (maximum !== undefined && count >= maximum) return false;
-    resolutionCounts[resolution] = count + 1;
-    return true;
-  });
+  const maximumTotal = Math.min(limits.total, maximumTotalResults);
+  if (maximumTotal === 0) return [];
 
-  return limited.slice(0, Math.min(limits.total, maximumTotalResults));
+  const selected = new Set<number>();
+  const resolutionCounts: Partial<Record<Resolution, number>> = {};
+  const providers = rankedResults
+    .map(({ result }) => result.provider)
+    .filter((provider, index, values) => values.indexOf(provider) === index);
+
+  if (providers.length <= maximumTotal) {
+    for (const provider of [...providers].reverse()) {
+      const index = rankedResults.findIndex(
+        (ranked, candidateIndex) =>
+          !selected.has(candidateIndex) &&
+          ranked.result.provider === provider &&
+          canAdd(ranked, limits, resolutionCounts),
+      );
+      const candidate = rankedResults[index];
+      if (index >= 0 && candidate !== undefined) add(index, candidate, selected, resolutionCounts);
+    }
+  }
+
+  for (const [index, candidate] of rankedResults.entries()) {
+    if (selected.size >= maximumTotal) break;
+    if (selected.has(index) || !canAdd(candidate, limits, resolutionCounts)) continue;
+    add(index, candidate, selected, resolutionCounts);
+  }
+
+  return rankedResults.filter((_, index) => selected.has(index));
+}
+
+function canAdd(
+  candidate: RankedResult,
+  limits: UserConfiguration['limits'],
+  resolutionCounts: Readonly<Partial<Record<Resolution, number>>>,
+): boolean {
+  const resolution = candidate.result.parsed?.resolution ?? 'unknown';
+  const maximum = limits.perResolution[resolution];
+  return maximum === undefined || (resolutionCounts[resolution] ?? 0) < maximum;
+}
+
+function add(
+  index: number,
+  candidate: RankedResult,
+  selected: Set<number>,
+  resolutionCounts: Partial<Record<Resolution, number>>,
+): void {
+  selected.add(index);
+  const resolution = candidate.result.parsed?.resolution ?? 'unknown';
+  resolutionCounts[resolution] = (resolutionCounts[resolution] ?? 0) + 1;
 }
 
 function assertNonNegativeInteger(value: number, name: string): void {
