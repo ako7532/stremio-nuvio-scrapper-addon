@@ -251,12 +251,13 @@ describe('production integration', () => {
     expect(listTorrents).not.toHaveBeenCalled();
   });
 
-  it('assembles SKTorrent and Webshare only when independently enabled', () => {
+  it('assembles SKTorrent, Webshare, and an internal Indexers provider only when enabled', () => {
     const base = configuration();
     const service = configurationService(base);
     const search = vi.fn<StreamProvider['search']>().mockResolvedValue([]);
     const sktorrentProvider = vi.fn().mockReturnValue(provider('sktorrent', search));
     const webshareProvider = vi.fn().mockReturnValue(provider('webshare', search));
+    const indexersProvider = vi.fn().mockReturnValue(provider('indexers', search));
     const integration = createProductionIntegration({
       configurationService: service,
       baseUrl: 'https://addon.example/',
@@ -272,12 +273,14 @@ describe('production integration', () => {
         }),
         sktorrentProvider,
         webshareProvider,
+        indexersProvider,
       },
     });
 
     integration.searchStreamsForConfiguration(base);
     expect(sktorrentProvider).toHaveBeenCalledOnce();
     expect(webshareProvider).not.toHaveBeenCalled();
+    expect(indexersProvider).not.toHaveBeenCalled();
 
     integration.searchStreamsForConfiguration({
       ...base,
@@ -296,6 +299,28 @@ describe('production integration', () => {
     });
     expect(sktorrentProvider).toHaveBeenCalledOnce();
     expect(webshareProvider).toHaveBeenCalledOnce();
+    expect(indexersProvider).not.toHaveBeenCalled();
+
+    const indexersConfiguration: StoredConfiguration = {
+      ...base,
+      updatedAt: '2026-09-06T23:01:00.000Z',
+      configuration: {
+        ...base.configuration,
+        providers: {
+          sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
+          webshare: { enabled: false },
+          indexers: { enabled: true },
+        },
+      },
+    };
+    integration.searchStreamsForConfiguration(indexersConfiguration);
+    expect(sktorrentProvider).toHaveBeenCalledOnce();
+    expect(webshareProvider).toHaveBeenCalledOnce();
+    expect(indexersProvider).toHaveBeenCalledOnce();
+
+    integration.invalidate(base.id);
+    integration.searchStreamsForConfiguration(indexersConfiguration);
+    expect(indexersProvider).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -335,7 +360,7 @@ function provider(name: StreamProvider['name'], search: StreamProvider['search']
     name,
     capabilities: {
       search: true,
-      source: name === 'sktorrent' ? 'torrent' : 'file-hosting',
+      source: name === 'webshare' ? 'file-hosting' : 'torrent',
       requiresAuthentication: true,
       supportsDirectStreaming: name === 'webshare',
       supportsCacheLookup: false,

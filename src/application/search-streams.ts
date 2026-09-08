@@ -126,6 +126,7 @@ export function createSearchStreams(dependencies: SearchStreamsDependencies): Se
       const queries = generateSearchQueries(metadata, { includeSeasonPacks: true });
       const providerResults = await searchProviders(
         providers,
+        metadata,
         queries,
         dependencies.configuration,
         context,
@@ -254,6 +255,7 @@ async function findEpisodePrecacheCandidate(
 ): Promise<RankedResult | undefined> {
   const results = await searchProviders(
     providers,
+    metadata,
     generateSearchQueries(metadata, { includeSeasonPacks: true }),
     dependencies.configuration,
     context,
@@ -337,6 +339,7 @@ function playbackAvailabilityRejection(
 
 async function searchProviders(
   providers: readonly StreamProvider[],
+  metadata: MediaMetadata,
   queries: readonly SearchQuery[],
   configuration: UserConfiguration,
   context: SearchStreamsContext,
@@ -358,6 +361,29 @@ async function searchProviders(
       const startedAt = clock();
       const results: ProviderResult[] = [];
       let failureCount = 0;
+      if (provider.searchMetadata !== undefined) {
+        try {
+          results.push(...(await provider.searchMetadata(metadata, context)));
+        } catch (error) {
+          context.signal.throwIfAborted();
+          failureCount += 1;
+          observeSearch(observer, {
+            type: 'provider-error',
+            provider: provider.name,
+            category: classifyApplicationError(error, 'ProviderUnavailable').kind,
+            correlationId: context.correlationId,
+          });
+        }
+        observeSearch(observer, {
+          type: 'provider-complete',
+          provider: provider.name,
+          durationMs: Math.max(0, clock() - startedAt),
+          rawResultCount: results.length,
+          failureCount,
+          correlationId: context.correlationId,
+        });
+        return results;
+      }
       const queryGroups: readonly (readonly [SearchStage, readonly SearchQuery[]])[] = [
         ['precise', primaryQueries],
         ['season', fallbackQueries],

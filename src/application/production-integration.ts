@@ -53,6 +53,10 @@ export type ProductionIntegrationOptions = {
       configuration: StoredConfiguration,
       timeoutMs: number,
     ) => StreamProvider | undefined;
+    indexersProvider?: (
+      configuration: StoredConfiguration,
+      timeoutMs: number,
+    ) => StreamProvider | undefined;
     torboxClient?: (apiKey: string, timeoutMs: number) => TorboxApiClient;
   };
 };
@@ -206,6 +210,10 @@ const assembleSearch = (
         ),
       );
     }
+  }
+  if (stored.configuration.providers.indexers?.enabled === true) {
+    const injected = options.factories?.indexersProvider?.(stored, timeoutMs);
+    if (injected !== undefined) providers.push(injected);
   }
   const torboxCredential = stored.credentials.torbox;
   const torboxClient =

@@ -351,6 +351,86 @@ describe('SearchStreams', () => {
     );
   });
 
+  it('runs a metadata-aware Indexers provider once and requires TorBox playback', async () => {
+    const resolvedMetadata = {
+      type: 'movie' as const,
+      id: 'tt0807840',
+      imdbId: 'tt0807840',
+      originalTitle: 'Sintel',
+      alternativeTitles: [],
+      year: 2010,
+    };
+    const metadataResolver: MetadataResolver = {
+      resolve: vi.fn().mockResolvedValue(resolvedMetadata),
+    };
+    const querySearch = vi.fn<StreamProvider['search']>().mockRejectedValue(new Error('unused'));
+    const searchMetadata = vi
+      .fn()
+      .mockResolvedValue([{ ...torrentResult('i'), provider: 'indexers' as const }]);
+    const provider: StreamProvider = {
+      name: 'indexers',
+      capabilities: {
+        search: true,
+        source: 'torrent',
+        requiresAuthentication: true,
+        supportsDirectStreaming: false,
+        supportsCacheLookup: false,
+      },
+      search: querySearch,
+      searchMetadata,
+    };
+    const indexersConfiguration: UserConfiguration = {
+      ...configuration,
+      providers: {
+        sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
+        webshare: { enabled: false },
+        indexers: { enabled: true },
+      },
+    };
+    const withoutTorbox = createSearchStreams({
+      metadataResolver,
+      providers: [provider],
+      configuration: indexersConfiguration,
+      caching: false,
+      providerExecutionPolicy: false,
+    });
+
+    await expect(
+      withoutTorbox.search(
+        { type: 'movie', id: 'tt0807840' },
+        { signal: new AbortController().signal, correlationId: 'indexers-without-torbox' },
+      ),
+    ).resolves.toEqual([]);
+    expect(searchMetadata).toHaveBeenCalledOnce();
+    expect(searchMetadata).toHaveBeenCalledWith(
+      resolvedMetadata,
+      expect.objectContaining({ correlationId: 'indexers-without-torbox' }),
+    );
+    expect(querySearch).not.toHaveBeenCalled();
+
+    const withTorbox = createSearchStreams({
+      metadataResolver,
+      providers: [provider],
+      configuration: indexersConfiguration,
+      deferCacheEnrichmentUntilPlayback: true,
+      cacheEnricher: vi.fn(),
+      torboxPlaybackUrl: () => 'https://addon.example/play/opaque-indexers-reference',
+      caching: false,
+      providerExecutionPolicy: false,
+    });
+    const streams = await withTorbox.search(
+      { type: 'movie', id: 'tt0807840' },
+      { signal: new AbortController().signal, correlationId: 'indexers-with-torbox' },
+    );
+    expect(streams).toHaveLength(1);
+    expect(streams[0]).toHaveProperty(
+      'url',
+      'https://addon.example/play/opaque-indexers-reference',
+    );
+    expect(searchMetadata).toHaveBeenCalledTimes(2);
+    expect(querySearch).not.toHaveBeenCalled();
+  });
+
   it('runs bounded movie fallback queries only when precise queries return no results', async () => {
     const metadataResolver: MetadataResolver = {
       resolve: vi.fn().mockResolvedValue({

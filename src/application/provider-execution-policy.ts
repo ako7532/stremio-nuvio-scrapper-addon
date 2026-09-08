@@ -1,5 +1,5 @@
-import type { SearchQuery } from '../domain/media.js';
 import { createFixedWindowRateLimiter } from '../infrastructure/fixed-window-rate-limiter.js';
+import { IndexerBackendError } from '../providers/indexers/indexer-backend.js';
 import { SktorrentHttpError } from '../providers/sktorrent/sktorrent-http-client.js';
 import type { ProviderSearchContext, StreamProvider } from '../providers/provider.js';
 import { WebshareTransportError } from '../providers/webshare/webshare-api-client.js';
@@ -26,6 +26,7 @@ export function applyProviderExecutionPolicy(
   provider: StreamProvider,
   options: ProviderExecutionPolicyOptions = {},
 ): StreamProvider {
+  const metadataSearch = provider.searchMetadata?.bind(provider);
   const maximumConcurrency = positiveInteger(
     options.maximumConcurrency ?? DEFAULT_MAXIMUM_CONCURRENCY,
     'provider concurrency',
@@ -54,20 +55,33 @@ export function applyProviderExecutionPolicy(
     capabilities: provider.capabilities,
     search(query, context) {
       return semaphore.run(context.signal, () =>
-        searchWithRetry(provider, query, context, limiter, maximumAttempts, retryDelayMs),
+        executeWithRetry(provider, context, limiter, maximumAttempts, retryDelayMs, () =>
+          provider.search(query, context),
+        ),
       );
     },
+    ...(metadataSearch === undefined
+      ? {}
+      : {
+          searchMetadata(metadata, context) {
+            return semaphore.run(context.signal, () =>
+              executeWithRetry(provider, context, limiter, maximumAttempts, retryDelayMs, () =>
+                metadataSearch(metadata, context),
+              ),
+            );
+          },
+        }),
   };
 }
 
-async function searchWithRetry(
+async function executeWithRetry<Value>(
   provider: StreamProvider,
-  query: SearchQuery,
   context: ProviderSearchContext,
   limiter: ReturnType<typeof createFixedWindowRateLimiter>,
   maximumAttempts: number,
   retryDelayMs: number,
-) {
+  operation: () => Promise<Value>,
+): Promise<Value> {
   for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
     context.signal.throwIfAborted();
     const decision = limiter.consume(provider.name);
@@ -75,7 +89,7 @@ async function searchWithRetry(
       throw new ApplicationError('RateLimited', { retryAfterMs: decision.retryAfterMs });
     }
     try {
-      return await provider.search(query, context);
+      return await operation();
     } catch (error) {
       context.signal.throwIfAborted();
       if (attempt >= maximumAttempts || !isTransientProviderError(error)) {
@@ -93,6 +107,9 @@ function isTransientProviderError(error: unknown): boolean {
     return error.kind === 'timeout' || error.kind === 'unavailable';
   }
   if (error instanceof WebshareTransportError) {
+    return error.kind === 'timeout' || error.kind === 'unavailable';
+  }
+  if (error instanceof IndexerBackendError) {
     return error.kind === 'timeout' || error.kind === 'unavailable';
   }
   return error instanceof ApplicationError && error.kind === 'ProviderTimeout';
