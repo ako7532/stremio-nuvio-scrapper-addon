@@ -1,4 +1,5 @@
 import type { TorrentFileStore } from '../../application/torrent-file-store.js';
+import { observeSearch, type SearchObserver } from '../../application/search-observability.js';
 import type { MediaMetadata, SearchQuery } from '../../domain/media.js';
 import type { TorrentProviderResult } from '../../domain/release.js';
 import { createBoundedTtlCache } from '../../infrastructure/bounded-ttl-cache.js';
@@ -27,6 +28,7 @@ export type IndexersProviderOptions = {
   metadataCacheTtlMs?: number;
   clock?: () => number;
   torrentFiles?: { store: TorrentFileStore; namespace: string };
+  observer?: SearchObserver;
 };
 
 const DEFAULT_INDEXER_CONCURRENCY = 3;
@@ -79,18 +81,23 @@ export const createIndexersProvider = (
     metadata: MediaMetadata,
     context: ProviderSearchContext,
   ): Promise<readonly TorrentProviderResult[]> => {
+    const counters = { queryCount: 0 };
     const discovered = await cachedDiscovery(backend, discoveryCache, context);
     const byId = new Map(discovered.map((indexer) => [indexer.backendId, indexer]));
     const eligible = selectedIndexerIds.flatMap((id) => {
       const indexer = byId.get(id);
       return indexer !== undefined && isEligiblePublicTorrentIndexer(indexer) ? [indexer] : [];
     });
-    if (eligible.length === 0) return [];
+    if (eligible.length === 0) {
+      observeSummary(options.observer, context, selectedIndexerIds.length, 0, counters, 0, [], []);
+      return [];
+    }
 
     const indexerSettlements = await mapSettledWithConcurrency(
       eligible,
       indexerConcurrency,
-      async (indexer) => searchOneIndexer(backend, capabilitiesCache, indexer, metadata, context),
+      async (indexer) =>
+        searchOneIndexer(backend, capabilitiesCache, indexer, metadata, context, counters),
     );
     context.signal.throwIfAborted();
     const searched = indexerSettlements.flatMap((settlement) =>
@@ -99,7 +106,19 @@ export const createIndexersProvider = (
     const successfulIndexers = indexerSettlements.filter(
       (settlement) => settlement.status === 'fulfilled',
     ).length;
-    if (successfulIndexers === 0) throw preferredFailure(indexerSettlements);
+    if (successfulIndexers === 0) {
+      observeSummary(
+        options.observer,
+        context,
+        selectedIndexerIds.length,
+        eligible.length,
+        counters,
+        0,
+        [],
+        [],
+      );
+      throw preferredFailure(indexerSettlements);
+    }
 
     const relevant = deduplicateRawResults(searched).filter((result) =>
       preliminaryMatch(metadata, result),
@@ -150,9 +169,30 @@ export const createIndexersProvider = (
       acquired.length === 0 &&
       acquisitionSettlements.every((settlement) => settlement.status === 'rejected')
     ) {
+      observeSummary(
+        options.observer,
+        context,
+        selectedIndexerIds.length,
+        eligible.length,
+        counters,
+        relevant.length,
+        acquisitionSettlements,
+        [],
+      );
       throw preferredFailure(acquisitionSettlements);
     }
-    return deduplicateNormalized([...ready, ...acquired]);
+    const normalized = deduplicateNormalized([...ready, ...acquired]);
+    observeSummary(
+      options.observer,
+      context,
+      selectedIndexerIds.length,
+      eligible.length,
+      counters,
+      relevant.length,
+      acquisitionSettlements,
+      normalized,
+    );
+    return normalized;
   };
 
   return {
@@ -199,6 +239,7 @@ const searchOneIndexer = async (
   indexer: IndexerDiscoveryResult,
   metadata: MediaMetadata,
   context: ProviderSearchContext,
+  counters: { queryCount: number },
 ): Promise<readonly IndexerSearchResult[]> => {
   const indexerCapabilities = await cachedCapabilities(backend, cache, indexer.backendId, context);
   const queries = planIndexerQueries(metadata, indexerCapabilities);
@@ -206,6 +247,7 @@ const searchOneIndexer = async (
   const failures: unknown[] = [];
   for (const query of queries) {
     try {
+      counters.queryCount += 1;
       results.push(
         ...(await backend.search(indexer, query, metadata.type, { signal: context.signal })),
       );
@@ -222,6 +264,29 @@ const searchOneIndexer = async (
   }
   if (queries.length > 0 && failures.length === queries.length) throw preferredError(failures);
   return results;
+};
+
+const observeSummary = (
+  observer: SearchObserver | undefined,
+  context: ProviderSearchContext,
+  selectedIndexerCount: number,
+  eligibleIndexerCount: number,
+  counters: { queryCount: number },
+  matchedResultCount: number,
+  acquisitions: readonly Settled<TorrentProviderResult>[],
+  returned: readonly TorrentProviderResult[],
+): void => {
+  observeSearch(observer, {
+    type: 'indexers-provider-summary',
+    selectedIndexerCount,
+    eligibleIndexerCount,
+    queryCount: counters.queryCount,
+    matchedResultCount,
+    acquisitionAttemptCount: acquisitions.length,
+    acquisitionFailureCount: acquisitions.filter(({ status }) => status === 'rejected').length,
+    returnedResultCount: returned.length,
+    correlationId: context.correlationId,
+  });
 };
 
 const preliminaryMatch = (metadata: MediaMetadata, result: IndexerSearchResult): boolean => {

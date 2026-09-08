@@ -199,6 +199,86 @@ describe('IndexersProvider', () => {
     expect(maximumActive).toBe(2);
   });
 
+  it('keeps successful hashes and acquisitions when another acquisition fails', async () => {
+    const { backend, searchMock, acquireMock } = fakeBackend({
+      discovered: [indexer('public')],
+    });
+    searchMock.mockResolvedValue([
+      result('public', 'Sintel.2010.720p.WEB-DL.mkv', { infoHash: 'b'.repeat(40) }),
+      result('public', 'Sintel.2010.1080p.WEB-DL.Release1.mkv', {
+        acquisitionReference: 'successful',
+      }),
+      result('public', 'Sintel.2010.1080p.WEB-DL.Release2.mkv', {
+        acquisitionReference: 'failed',
+      }),
+    ]);
+    acquireMock.mockImplementation((_indexerId, reference) =>
+      reference === 'successful'
+        ? Promise.resolve({
+            kind: 'magnet',
+            infoHash: 'c'.repeat(40),
+            magnetUri: `magnet:?xt=urn:btih:${'c'.repeat(40)}`,
+          })
+        : Promise.reject(new IndexerBackendError('unavailable', 'sanitized acquisition failure')),
+    );
+    const observer = vi.fn();
+    const provider = createIndexersProvider(backend, {
+      selectedIndexerIds: ['public'],
+      observer,
+    });
+
+    const results = await provider.searchMetadata?.(metadata, context);
+
+    expect(
+      results
+        ?.filter(isTorrentProviderResult)
+        .map((candidate) => candidate.infoHash)
+        .sort(),
+    ).toEqual(['b'.repeat(40), 'c'.repeat(40)]);
+    expect(observer).toHaveBeenCalledWith({
+      type: 'indexers-provider-summary',
+      selectedIndexerCount: 1,
+      eligibleIndexerCount: 1,
+      queryCount: 2,
+      matchedResultCount: 3,
+      acquisitionAttemptCount: 2,
+      acquisitionFailureCount: 1,
+      returnedResultCount: 2,
+      correlationId: context.correlationId,
+    });
+  });
+
+  it('surfaces complete acquisition failure instead of returning an empty success', async () => {
+    const { backend, searchMock, acquireMock } = fakeBackend({
+      discovered: [indexer('public')],
+    });
+    searchMock.mockResolvedValue([
+      result('public', 'Sintel.2010.1080p.WEB-DL.mkv', {
+        acquisitionReference: 'failed',
+      }),
+    ]);
+    acquireMock.mockRejectedValue(
+      new IndexerBackendError('timeout', 'sanitized acquisition timeout'),
+    );
+    const observer = vi.fn();
+    const provider = createIndexersProvider(backend, {
+      selectedIndexerIds: ['public'],
+      observer,
+    });
+
+    await expect(provider.searchMetadata?.(metadata, context)).rejects.toMatchObject({
+      kind: 'timeout',
+    });
+    expect(observer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'indexers-provider-summary',
+        acquisitionAttemptCount: 1,
+        acquisitionFailureCount: 1,
+        returnedResultCount: 0,
+      }),
+    );
+  });
+
   it('keeps discovery and capabilities caches inside the provider runtime TTL', async () => {
     let now = 1_000;
     const { backend, discoverMock, capabilitiesMock } = fakeBackend({

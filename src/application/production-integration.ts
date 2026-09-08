@@ -2,7 +2,7 @@ import type { ConfigurationService } from './configuration-service.js';
 import type { StoredConfiguration } from './configuration-store.js';
 import { ApplicationError } from './application-error.js';
 import { createPlaybackReferenceStore } from './playback-reference-store.js';
-import { createTorrentFileStore } from './torrent-file-store.js';
+import { createTorrentFileStore, type TorrentFileStore } from './torrent-file-store.js';
 import type { SearchObserver } from './search-observability.js';
 import { createSearchStreams, type SearchStreams } from './search-streams.js';
 import { createTorboxCacheEnricher } from './torbox-cache-enricher.js';
@@ -56,9 +56,15 @@ export type ProductionIntegrationOptions = {
     indexersProvider?: (
       configuration: StoredConfiguration,
       timeoutMs: number,
+      dependencies: IndexersProviderFactoryDependencies,
     ) => StreamProvider | undefined;
     torboxClient?: (apiKey: string, timeoutMs: number) => TorboxApiClient;
   };
+};
+
+export type IndexersProviderFactoryDependencies = {
+  torrentFiles: { store: TorrentFileStore; namespace: string };
+  observer?: SearchObserver;
 };
 
 type RuntimeEntry = { updatedAt: string; search: SearchStreams; expiresAt: number };
@@ -185,6 +191,7 @@ const assembleSearch = (
     };
   }
   const timeoutMs = stored.configuration.advanced?.providerTimeoutMs ?? 8_000;
+  const observer = stored.configuration.advanced?.safeDebug === true ? options.observer : undefined;
   const providers: StreamProvider[] = [];
   if (stored.configuration.providers.sktorrent.enabled) {
     const injected = options.factories?.sktorrentProvider?.(stored, timeoutMs);
@@ -212,7 +219,10 @@ const assembleSearch = (
     }
   }
   if (stored.configuration.providers.indexers?.enabled === true) {
-    const injected = options.factories?.indexersProvider?.(stored, timeoutMs);
+    const injected = options.factories?.indexersProvider?.(stored, timeoutMs, {
+      torrentFiles: { store: torrentFiles, namespace: stored.id },
+      ...(observer === undefined ? {} : { observer }),
+    });
     if (injected !== undefined) providers.push(injected);
   }
   const torboxCredential = stored.credentials.torbox;
@@ -221,7 +231,6 @@ const assembleSearch = (
       ? undefined
       : (options.factories?.torboxClient?.(torboxCredential.apiKey, timeoutMs) ??
         createTorboxApiClient({ apiKey: torboxCredential.apiKey, timeoutMs }));
-  const observer = stored.configuration.advanced?.safeDebug === true ? options.observer : undefined;
   return createSearchStreams({
     metadataResolver: new OrderedMetadataResolver([
       createTmdbMetadataSource(
