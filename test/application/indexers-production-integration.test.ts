@@ -48,7 +48,10 @@ describe('Indexers production integration', () => {
       configurationService: configurationService(stored),
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(4),
-      indexerEndpointPolicy: createIndexerEndpointPolicy(['https://prowlarr.example']),
+      indexerEndpointPolicy: createIndexerEndpointPolicy(['https://prowlarr.example'], {
+        lookup: () => Promise.resolve([{ address: '203.0.113.10', family: 4 }]),
+        connect: (url, init) => fetchMock(url, init),
+      }),
       factories: { tmdbClient: () => tmdbClient('Fixture Movie', 2024) },
     });
 

@@ -241,11 +241,13 @@ const assembleSearch = (
                 baseUrl: credential.endpoint,
                 apiKey: credential.apiKey,
                 timeoutMs,
+                fetch: options.indexerEndpointPolicy.request,
               })
             : createJackettBackend({
                 baseUrl: credential.endpoint,
                 apiKey: credential.apiKey,
                 timeoutMs,
+                fetch: options.indexerEndpointPolicy.request,
               });
         providers.push(
           createIndexersProvider(backend, {

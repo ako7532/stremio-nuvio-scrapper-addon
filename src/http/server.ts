@@ -317,12 +317,16 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     if (credential === undefined || backend === undefined) {
       return reply.code(400).send({ error: 'Indexers connection settings are required' });
     }
+    const controller = new AbortController();
+    request.raw.once('aborted', () => {
+      controller.abort();
+    });
     try {
       const indexers = await options.indexerConnectionDiscovery(
         backend,
         credential,
         stored?.configuration.advanced?.providerTimeoutMs ?? 8_000,
-        undefined,
+        controller.signal,
       );
       return { status: 'ok' as const, indexers };
     } catch (error) {

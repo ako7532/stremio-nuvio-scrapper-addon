@@ -144,6 +144,22 @@ Production runtimes are cached per configuration ID and `updatedAt` for 30 minut
 - TorBox v2/hybrid behavior, live cache results, create behavior, and device playback were not tested and are not claimed.
 - Stremio/Nuvio device compatibility remains a later explicit smoke test.
 
+## Phase I7 hardening result
+
+Production Prowlarr and Jackett requests now pass through the administrator-owned exact-origin policy
+on every outbound operation. The policy resolves the destination, rejects forbidden or unexpected
+private address classes, and passes a validated address to a pinned HTTP/TLS connection so a second DNS
+lookup cannot change the destination. Explicit IP endpoints, loopback, and single-label Docker service
+names preserve intentional private-network deployment; link-local/cloud-metadata destinations remain
+forbidden. Prowlarr redirects are rejected, while Jackett accepts only a validated magnet redirect.
+
+Chunked discovery, capability, search, and acquisition bodies are stopped while streaming as soon as
+their configured byte limit is crossed. Indexers discovery also receives client-disconnect cancellation
+and is rejected by the existing provider-test rate limiter before backend work begins.
+
+The evidence matrix, cache/observability review, deployment guidance, and remaining live/device checks
+are maintained in [`INDEXERS_PHASE_I7_DOD.md`](./INDEXERS_PHASE_I7_DOD.md).
+
 ## Primary sources
 
 - Prowlarr current OpenAPI: https://raw.githubusercontent.com/Prowlarr/Prowlarr/develop/src/Prowlarr.Api.V1/openapi.json

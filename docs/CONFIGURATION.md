@@ -15,10 +15,21 @@ encrypted in server-side SQLite storage and the browser receives only configured
   The temporary HTTPS media URL is resolved only after an explicit playback GET.
 - **TorBox** is optional and uses the individual user's API key only after a playback click: to reuse or
   check the selected torrent, resolve playback, and run explicitly configured alternative precache.
+- **Public Indexers** is disabled by default. It connects to one Prowlarr or Jackett instance and only
+  searches explicitly selected, enabled public torrent indexers. The endpoint and API key remain in
+  encrypted server-side credentials. Indexers V1 requires TorBox and never emits raw P2P streams.
 
 Provider connection tests execute server-side and return sanitized status only. Removing a credential
 does not disable its provider toggle automatically; keep enabled providers and available credentials in
 sync.
+
+For Indexers, the administrator must first add the exact backend origin to
+`INDEXER_ALLOWED_ORIGINS`. In the configure page choose Prowlarr or Jackett, enter its endpoint and API
+key, select **Test connection and discover**, then select at most 20 public indexers. Backend changes
+clear the old selection. Saved endpoint and key values are never loaded back into the browser.
+
+Complete the normal installation flow in this order: **Save configuration**, then **Install in
+Stremio**. Discovery is read-only and does not contact or mutate TorBox.
 
 ## Matching and display
 

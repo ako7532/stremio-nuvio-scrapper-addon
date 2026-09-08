@@ -23,7 +23,10 @@ describe('Indexer connection discovery', () => {
       .mockResolvedValueOnce(response(capabilitiesFixture, 'application/xml'));
     vi.stubGlobal('fetch', fetchMock);
     const discover = createIndexerConnectionDiscovery({
-      endpointPolicy: createIndexerEndpointPolicy(['https://prowlarr.example']),
+      endpointPolicy: createIndexerEndpointPolicy(['https://prowlarr.example'], {
+        lookup: () => Promise.resolve([{ address: '203.0.113.10', family: 4 }]),
+        connect: (url, init) => fetchMock(url, init),
+      }),
     });
 
     await expect(
@@ -48,7 +51,10 @@ describe('Indexer connection discovery', () => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal('fetch', fetchMock);
     const discover = createIndexerConnectionDiscovery({
-      endpointPolicy: createIndexerEndpointPolicy(['https://allowed.example']),
+      endpointPolicy: createIndexerEndpointPolicy(['https://allowed.example'], {
+        lookup: () => Promise.resolve([{ address: '203.0.113.10', family: 4 }]),
+        connect: (url, init) => fetchMock(url, init),
+      }),
     });
 
     await expect(

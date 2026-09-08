@@ -5,16 +5,17 @@ metadata, providers, caches, and playback dependencies for configured stream rou
 
 ## Required environment
 
-| Variable                | Required   | Default                 | Purpose                                                                          |
-| ----------------------- | ---------- | ----------------------- | -------------------------------------------------------------------------------- |
-| `CONFIG_ENCRYPTION_KEY` | Yes        | none                    | Stable base64-encoded 32-byte key used to encrypt per-user provider credentials. |
-| `ADDON_BASE_URL`        | Production | `http://127.0.0.1:7000` | Public HTTPS base URL placed in generated manifest links.                        |
-| `CONFIG_DATABASE_PATH`  | No         | `addon.sqlite`          | SQLite file; the container defaults to `/data/addon.sqlite`.                     |
-| `HOST`                  | No         | `0.0.0.0`               | Listen address.                                                                  |
-| `PORT`                  | No         | `7000`                  | Listen port.                                                                     |
-| `LOG_LEVEL`             | No         | `info`                  | Pino level from `fatal` through `trace`, or `silent`.                            |
-| `TRUST_PROXY`           | No         | `false`                 | Trust forwarded client addresses only behind a controlled reverse proxy.         |
-| `SHUTDOWN_TIMEOUT_MS`   | No         | `10000`                 | Forced-shutdown deadline, from 1 to 60 seconds.                                  |
+| Variable                  | Required   | Default                 | Purpose                                                                          |
+| ------------------------- | ---------- | ----------------------- | -------------------------------------------------------------------------------- |
+| `CONFIG_ENCRYPTION_KEY`   | Yes        | none                    | Stable base64-encoded 32-byte key used to encrypt per-user provider credentials. |
+| `ADDON_BASE_URL`          | Production | `http://127.0.0.1:7000` | Public HTTPS base URL placed in generated manifest links.                        |
+| `CONFIG_DATABASE_PATH`    | No         | `addon.sqlite`          | SQLite file; the container defaults to `/data/addon.sqlite`.                     |
+| `INDEXER_ALLOWED_ORIGINS` | Indexers   | empty                   | Exact comma-separated Prowlarr/Jackett origins; empty disables Indexers.         |
+| `HOST`                    | No         | `0.0.0.0`               | Listen address.                                                                  |
+| `PORT`                    | No         | `7000`                  | Listen port.                                                                     |
+| `LOG_LEVEL`               | No         | `info`                  | Pino level from `fatal` through `trace`, or `silent`.                            |
+| `TRUST_PROXY`             | No         | `false`                 | Trust forwarded client addresses only behind a controlled reverse proxy.         |
+| `SHUTDOWN_TIMEOUT_MS`     | No         | `10000`                 | Forced-shutdown deadline, from 1 to 60 seconds.                                  |
 
 Generate the encryption key locally and store it in a secrets manager:
 
@@ -40,6 +41,48 @@ container health check at `/health`.
 
 Terminate with `docker compose down`. Keep the named volume when configurations must survive upgrades.
 Back up the SQLite database and encryption key together; either one without the other is insufficient.
+
+## Prowlarr or Jackett on a private Docker network
+
+Attach the addon and one backend to the same Compose network. The addon endpoint entered in the UI may
+contain a path prefix, but the allowlist contains only the exact origin:
+
+```yaml
+services:
+  addon:
+    environment:
+      INDEXER_ALLOWED_ORIGINS: http://prowlarr:9696
+    networks: [indexers]
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    volumes:
+      - prowlarr-config:/config
+    networks: [indexers]
+
+networks:
+  indexers:
+    internal: true
+
+volumes:
+  prowlarr-config:
+```
+
+For Jackett use `http://jackett:9117`, `lscr.io/linuxserver/jackett:latest`, and a separate `/config`
+volume. The backend port does not need to be published to the host for addon access. Temporarily publish
+the administration UI only on a trusted interface if needed, configure authentication, add only public
+torrent indexers, then remove that mapping. Do not expose Prowlarr or Jackett unauthenticated.
+The image names and default ports follow the
+[Prowlarr container documentation](https://docs.linuxserver.io/images/docker-prowlarr/) and
+[Jackett container documentation](https://github.com/linuxserver/docker-jackett/blob/master/README.md).
+
+For a backend behind a controlled HTTPS reverse proxy, allowlist only its public origin, for example
+`https://indexers.example`. Public FQDNs resolving to private addresses are rejected; use an explicit
+private IP, `localhost`, or a single-label Docker service name when private routing is intentional.
+
+After deployment, the user flow is: open `/configure`, enable Public Indexers, choose the backend, enter
+the endpoint and API key, discover and select public indexers, **Save configuration**, then **Install in
+Stremio**. Indexers remains public-only and TorBox-only.
 
 ## Reverse proxy
 

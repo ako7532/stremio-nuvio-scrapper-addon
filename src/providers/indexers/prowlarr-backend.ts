@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { calculateV1InfoHash, TorrentMetainfoError } from '../torrent-metainfo.js';
+import { readBoundedResponseBody } from './bounded-response-body.js';
 import {
   IndexerBackendError,
   type IndexerBackend,
@@ -74,18 +75,12 @@ export const createProwlarrBackend = (options: ProwlarrBackendOptions): IndexerB
         signal,
       });
       if (!response.ok) throw responseError(response);
-      const declaredLength = response.headers.get('content-length');
-      if (
-        declaredLength !== null &&
-        /^\d+$/u.test(declaredLength) &&
-        Number(declaredLength) > maximumResponseBytes
-      ) {
-        throw invalidResponse('Prowlarr response is too large');
-      }
-      const bytes = await response.arrayBuffer();
-      if (bytes.byteLength > maximumResponseBytes) {
-        throw invalidResponse('Prowlarr response is too large');
-      }
+      const bytes = await readBoundedResponseBody(
+        response,
+        maximumResponseBytes,
+        'Prowlarr response',
+        invalidResponse,
+      );
       return {
         body: new TextDecoder().decode(bytes),
         contentType: response.headers.get('content-type')?.toLowerCase(),
@@ -209,20 +204,15 @@ const requestBinary = async (
       signal,
     });
     if (!response.ok) throw responseError(response);
-    const declaredLength = response.headers.get('content-length');
-    if (
-      declaredLength !== null &&
-      /^\d+$/u.test(declaredLength) &&
-      Number(declaredLength) > maximumBytes
-    ) {
-      throw invalidResponse('Prowlarr torrent file is too large');
-    }
-    const body = await response.arrayBuffer();
-    if (body.byteLength === 0 || body.byteLength > maximumBytes) {
-      throw invalidResponse('Prowlarr torrent file has an invalid size');
-    }
+    const body = await readBoundedResponseBody(
+      response,
+      maximumBytes,
+      'Prowlarr torrent file',
+      invalidResponse,
+      true,
+    );
     return {
-      bytes: new Uint8Array(body),
+      bytes: body,
       contentType: response.headers.get('content-type')?.toLowerCase(),
     };
   } catch (error) {

@@ -1,6 +1,8 @@
 # Stremio / Nuvio CZ-SK scraper addon
 
-A self-hosted Stremio protocol addon that aggregates normalized stream results from SKTorrent and Webshare, with optional TorBox resolution and per-user TMDB metadata.
+A self-hosted Stremio protocol addon that aggregates normalized stream results from SKTorrent,
+Webshare, and optional public Prowlarr/Jackett indexers, with TorBox resolution and per-user TMDB
+metadata.
 
 The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation,
 fixture-backed Phase 3 SKTorrent provider, Phase 4 Webshare provider layer, and Phase 5 aggregation
@@ -37,10 +39,15 @@ base64-encoded 32-byte key; changing or losing it makes saved credentials unread
 CONFIG_ENCRYPTION_KEY=<base64-encoded 32-byte key>
 CONFIG_DATABASE_PATH=addon.sqlite
 ADDON_BASE_URL=http://127.0.0.1:7000
+INDEXER_ALLOWED_ORIGINS=
 ```
 
 Use HTTPS for `ADDON_BASE_URL` outside local development. Both `.env` and SQLite database files are
 ignored by Git.
+
+Public Indexers are disabled by default and use TorBox-only playback. The administrator must list
+each permitted Prowlarr or Jackett origin in `INDEXER_ALLOWED_ORIGINS`; an empty value disables all
+indexer connections. See the configuration and deployment guides before enabling this provider.
 
 The default server address is `http://127.0.0.1:7000` when accessed locally. It listens on `0.0.0.0` so it also works in a container.
 
@@ -66,7 +73,9 @@ npm run build
 See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/protocol constraints and the remaining Phase 0 validation items.
 Operational references are in [deployment](./docs/DEPLOYMENT.md),
 [configuration](./docs/CONFIGURATION.md), [security](./docs/SECURITY.md), and
-[troubleshooting](./docs/TROUBLESHOOTING.md).
+[troubleshooting](./docs/TROUBLESHOOTING.md). Public Indexers Phase I7 evidence and explicitly
+unverified live/device checks are tracked in the
+[Definition of Done matrix](./docs/INDEXERS_PHASE_I7_DOD.md).
 
 ## Implemented domain pipeline
 
@@ -104,6 +113,8 @@ Operational references are in [deployment](./docs/DEPLOYMENT.md),
 - Bounded metadata, provider-search, SKTorrent-detail, and TorBox-status caches
 - Per-provider concurrency, queue, operation-budget, and transient-retry policy
 - Safe provider/search/cache observations without queries, media IDs, URLs, or credentials
+- Exact-origin and DNS/IP-pinned outbound Indexers requests with redirects disabled or restricted to
+  verified magnet responses
 - Graceful shutdown, explicit reverse-proxy trust, Docker deployment, and CI quality gates
 
 Production metadata and per-user search/playback dependency wiring is assembled outside `src/main.ts`

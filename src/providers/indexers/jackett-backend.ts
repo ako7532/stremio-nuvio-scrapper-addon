@@ -1,4 +1,5 @@
 import { calculateV1InfoHash, TorrentMetainfoError } from '../torrent-metainfo.js';
+import { readBoundedResponseBody } from './bounded-response-body.js';
 import {
   IndexerBackendError,
   type AcquiredTorrent,
@@ -254,19 +255,7 @@ const boundedBody = async (
   label: string,
   requireNonEmpty = false,
 ): Promise<Uint8Array> => {
-  const declaredLength = response.headers.get('content-length');
-  if (
-    declaredLength !== null &&
-    /^\d+$/u.test(declaredLength) &&
-    Number(declaredLength) > maximumBytes
-  ) {
-    throw invalidResponse(`${label} is too large`);
-  }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > maximumBytes || (requireNonEmpty && bytes.byteLength === 0)) {
-    throw invalidResponse(`${label} has an invalid size`);
-  }
-  return bytes;
+  return readBoundedResponseBody(response, maximumBytes, label, invalidResponse, requireNonEmpty);
 };
 
 const magnetFromRedirect = (response: Response, expectedInfoHash?: string): AcquiredTorrent => {

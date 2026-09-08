@@ -16,6 +16,28 @@
 - Search and HEAD are read-only. Selected playback and precache mutations are late, server-side,
   token-bound, per-user limited, and idempotent.
 
+## Public Indexers outbound policy
+
+`INDEXER_ALLOWED_ORIGINS` is an administrator-owned, exact-origin allowlist. User-supplied endpoints
+cannot add an origin, change HTTP/HTTPS, or carry URL credentials, query data, or fragments. A path
+prefix may be stored on the endpoint, while allowlist entries contain origins only.
+
+Before every production Prowlarr or Jackett request the addon resolves the approved hostname, rejects
+invalid, unspecified, multicast, and link-local addresses, and pins the HTTP/TLS connection to the
+validated IP while retaining the original Host header and TLS server name. A public FQDN cannot resolve
+to private or loopback space, including after DNS rebinding. Explicit IP endpoints, `localhost`, and
+single-label Docker service names may use private or loopback networks because the administrator named
+that destination directly. Cloud-metadata/link-local addresses remain forbidden.
+
+Prowlarr redirects are never followed. Jackett acquisition accepts only a syntactically valid BitTorrent
+v1 magnet redirect and verifies an expected identity when one exists; HTTP(S) redirects are not
+followed. Authentication is attached only to requests whose origin passed this policy. Torznab links
+are reduced to backend-specific opaque acquisition references rather than fetched as arbitrary URLs.
+
+The policy is one-process state and does not replace egress firewalling. Production deployments should
+also isolate the addon and indexer backend on a dedicated network and deny access to host-management and
+cloud-metadata ranges.
+
 ## Deployment assumptions
 
 The in-memory caches, operation budgets, playback references, and rate limiters assume one process. A
@@ -26,6 +48,13 @@ cannot be reached around a proxy that overwrites forwarding headers.
 The SQLite database and `CONFIG_ENCRYPTION_KEY` must be protected and backed up together. The opaque
 configuration URL is a bearer capability and should not be published. Debug logging never relaxes secret
 redaction rules.
+
+Indexers discovery uses the provider-test limiter (10 attempts per minute per client and provider by
+default), bounded capability concurrency of three, backend timeouts, and request cancellation when the
+client disconnects. Discovery/capability caches and the shared bounded provider-search cache are created
+inside the per-configuration runtime. Runtime update/revocation removes those caches, torrent metainfo,
+and playback references. This scope is not safe for multi-instance sharing without a common bounded
+state store.
 
 ## Remaining external validation
 

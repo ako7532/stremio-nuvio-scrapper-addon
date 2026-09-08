@@ -47,11 +47,13 @@ export const createIndexerConnectionDiscovery = (options: {
               baseUrl: credential.endpoint,
               apiKey: credential.apiKey,
               timeoutMs,
+              fetch: options.endpointPolicy.request,
             })
           : createJackettBackend({
               baseUrl: credential.endpoint,
               apiKey: credential.apiKey,
               timeoutMs,
+              fetch: options.endpointPolicy.request,
             });
       const context = signal === undefined ? {} : { signal };
       const discovered = (await backend.discover(context))

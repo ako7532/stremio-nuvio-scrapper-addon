@@ -31,6 +31,23 @@ reasons, TorBox cache-state counts, playback exclusions, and the final stream co
 after diagnosis to reduce log volume. These events never include credentials, configuration IDs,
 provider result IDs or hashes, magnet links, or playback URLs.
 
+## Public Indexers discovery fails
+
+- Confirm the backend origin, including scheme and port, exactly matches one entry in
+  `INDEXER_ALLOWED_ORIGINS`; allowlist entries must not contain a path.
+- From the addon container, resolve the Docker service name and reach Prowlarr on port 9696 or Jackett
+  on port 9117. Prefer a shared private Docker network without publishing the backend port.
+- A public hostname that resolves to RFC1918, loopback, or link-local space is rejected. For an intended
+  private backend use an explicitly allowlisted IP, `localhost`, or single-label Docker service name.
+- Confirm the API key and that the backend reports the tracker as enabled, searchable, public, and
+  torrent-based. Private, unknown, disabled, and Usenet indexers are intentionally omitted.
+- A capability failure leaves the public indexer visible as `capabilities-unavailable`; a total backend
+  failure returns a sanitized 502/503/504 category. A 429 includes `Retry-After`.
+
+Discovery, stream search, and playback HEAD are read-only with respect to TorBox. Do not use a missing
+TorBox dashboard event as evidence that Indexers discovery failed; TorBox work starts only after the
+selected playback GET.
+
 ## An uncached TorBox stream does not start immediately
 
 The source list does not contact TorBox, so cache state is decided only after the playback click. If

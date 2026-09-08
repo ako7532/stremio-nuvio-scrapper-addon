@@ -193,10 +193,34 @@ describe('configuration HTTP API', () => {
       'jackett',
       stored.credentials.indexers,
       8_000,
-      undefined,
+      expect.any(AbortSignal),
     );
     expect(response.body).not.toContain('stored-indexers-key-fixture');
     expect(response.body).not.toContain('stored-indexers.invalid');
+  });
+
+  it('rate limits Indexers discovery before backend work and returns Retry-After', async () => {
+    const indexerConnectionDiscovery = vi.fn();
+    const server = buildServer({
+      indexerConnectionDiscovery,
+      rateLimiters: {
+        providerTest: { consume: () => ({ allowed: false, retryAfterMs: 2_500 }) },
+      },
+    });
+    servers.push(server);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/indexers/discover',
+      payload: {
+        backend: 'prowlarr',
+        indexers: { endpoint: 'https://indexers.example', apiKey: 'fixture-key' },
+      },
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['retry-after']).toBe('3');
+    expect(indexerConnectionDiscovery).not.toHaveBeenCalled();
   });
 
   it('creates, safely reads, updates, and revokes an opaque configuration', async () => {
