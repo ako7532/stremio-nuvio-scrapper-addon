@@ -28,9 +28,9 @@ describe('Stremio stream formatter', () => {
 
     expect(streams).toEqual([
       {
-        name: 'SKTorrent 1080p',
+        name: '🇸🇰 SKTorrent • 1080p',
         title:
-          'Movie.1080p.WEB-DL.SK.HEVC.EAC3.5.1.mkv\nSK 1080p WEB-DL HEVC\n2.0 GB • EAC3 • S:34 • cached',
+          'Movie.1080p.WEB-DL.SK.HEVC.EAC3.5.1.mkv\n🎧 🇸🇰 SK • 🎞️ 1080p • 📺 WEB-DL • 🎥 HEVC\n💾 2.0 GB • 🔊 EAC3 5.1 • 🌱 34\n🧲 Direct P2P',
         infoHash: 'a'.repeat(40),
         behaviorHints: { filename: result.filename },
       },
@@ -81,7 +81,7 @@ describe('Stremio stream formatter', () => {
 
     expect(streams).toEqual([
       expect.objectContaining({
-        name: 'Indexers 1080p',
+        name: '🧲 Indexers • 1080p',
         type: 'movie',
         url: 'https://addon.example/play/opaque-token',
       }),
@@ -98,7 +98,33 @@ describe('Stremio stream formatter', () => {
       { type: 'movie', id: 'tt0807840' },
     );
 
-    expect(streams[0]?.title).toContain('TorBox download required');
+    expect(streams[0]?.title).toContain('⬇️ TorBox • UNCACHED • download starts after click');
+  });
+
+  it('uses language flags and honestly marks deferred TorBox cache status', () => {
+    const indexerResult: TorrentProviderResult = {
+      ...result,
+      provider: 'indexers',
+      id: 'indexer-unknown-cache',
+      cacheStatus: 'unknown',
+      parsed: parseRelease('Movie.2160p.WEB-DL.EN.HEVC.CZ.SUBS.mkv'),
+    };
+    const streams = formatStreams(
+      [{ ...ranked, result: indexerResult }],
+      configuration('direct-torrent'),
+      undefined,
+      () => 'https://addon.example/play/opaque-token',
+      { type: 'movie', id: 'tt0807840' },
+    );
+
+    expect(streams[0]).toEqual(
+      expect.objectContaining({
+        name: '🧲 Indexers • 4K',
+        title: expect.stringContaining('🎧 🇬🇧 EN') as unknown,
+      }),
+    );
+    expect(streams[0]?.title).toContain('💬 🇨🇿 CZ subtitles');
+    expect(streams[0]?.title).toContain('❔ TorBox cache • checked after click');
   });
 
   it('does not expose an unresolved multi-file series torrent', () => {

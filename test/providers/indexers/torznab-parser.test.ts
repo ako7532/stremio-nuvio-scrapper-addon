@@ -47,6 +47,22 @@ describe('Torznab parser', () => {
     ]);
   });
 
+  it('ignores empty optional attributes without discarding otherwise valid results', () => {
+    const longReference = `https://backend.example/download/${'a'.repeat(2_300)}`;
+    const results = parseTorznabResults(
+      `<rss xmlns:torznab="http://torznab.com/schemas/2015/feed"><channel><item><title>Dune.2021.1080p.WEB-DL</title><link>${longReference}</link><torznab:attr name="genre" value=""/><torznab:attr name="seeders" value="12"/></item></channel></rss>`,
+      { indexerId: 'fixture', indexerName: 'Fixture', mediaType: 'movie' },
+    );
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        releaseName: 'Dune.2021.1080p.WEB-DL',
+        acquisitionReference: longReference,
+        seeders: 12,
+      }),
+    ]);
+  });
+
   it('rejects declarations, conflicting attributes, oversized responses, and item overflow', () => {
     expect(() => parseTorznabCapabilities('<!DOCTYPE caps><caps />')).toThrow(TorznabParserError);
     expect(() =>
@@ -65,5 +81,11 @@ describe('Torznab parser', () => {
         { maximumItems: 1 },
       ),
     ).toThrow(/too many items/u);
+    expect(() =>
+      parseTorznabResults(
+        `<rss><channel><item><title>one</title><link>https://backend.example/${'a'.repeat(4_100)}</link></item></channel></rss>`,
+        { indexerId: 'fixture', indexerName: 'Fixture', mediaType: 'movie' },
+      ),
+    ).toThrow(/link exceeds its limit/u);
   });
 });

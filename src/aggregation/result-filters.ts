@@ -34,7 +34,9 @@ export function getFilterRejectionReason(
   result: ProviderResult,
   configuration: UserConfiguration,
 ): FilterRejectionReason | undefined {
-  if (configuration.providers[result.provider]?.enabled !== true) return 'provider disabled';
+  if (result.provider !== 'indexers' && !configuration.providers[result.provider].enabled) {
+    return 'provider disabled';
+  }
   if (result.provider === 'webshare' && (!result.available || !result.streamable)) {
     return 'webshare unavailable';
   }

@@ -18,9 +18,10 @@
 
 ## Public Indexers outbound policy
 
-`INDEXER_ALLOWED_ORIGINS` is an administrator-owned, exact-origin allowlist. User-supplied endpoints
-cannot add an origin, change HTTP/HTTPS, or carry URL credentials, query data, or fragments. A path
-prefix may be stored on the endpoint, while allowlist entries contain origins only.
+Prowlarr and Jackett endpoints are administrator-owned environment settings. They cannot be supplied or
+changed through the public configuration API or browser. The addon derives an exact-origin allowlist
+from enabled server backends; configured endpoints may contain a path prefix but cannot contain URL
+credentials, query data, or fragments.
 
 Before every production Prowlarr or Jackett request the addon resolves the approved hostname, rejects
 invalid, unspecified, multicast, and link-local addresses, and pins the HTTP/TLS connection to the
@@ -49,12 +50,12 @@ The SQLite database and `CONFIG_ENCRYPTION_KEY` must be protected and backed up 
 configuration URL is a bearer capability and should not be published. Debug logging never relaxes secret
 redaction rules.
 
-Indexers discovery uses the provider-test limiter (10 attempts per minute per client and provider by
-default), bounded capability concurrency of three, backend timeouts, and request cancellation when the
-client disconnects. Discovery/capability caches and the shared bounded provider-search cache are created
-inside the per-configuration runtime. Runtime update/revocation removes those caches, torrent metainfo,
-and playback references. This scope is not safe for multi-instance sharing without a common bounded
-state store.
+Indexer discovery is internal to server-managed searches; there is no public discovery endpoint.
+Discovery and capability work uses bounded concurrency of three, backend timeouts, and request
+cancellation when the client disconnects. Discovery/capability caches and the shared bounded
+provider-search cache are created inside the per-configuration runtime. Runtime update/revocation
+removes those caches, torrent metainfo, and playback references. This scope is not safe for
+multi-instance sharing without a common bounded state store.
 
 ## Remaining external validation
 

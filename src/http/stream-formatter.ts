@@ -95,44 +95,50 @@ function displayFields(
   const mode = configuration.display.mode;
   const parsed = result.parsed;
   const technical = [
-    parsed?.resolution,
-    parsed?.source === 'unknown' ? undefined : parsed?.source.toUpperCase(),
-    parsed?.videoCodec === 'unknown' ? undefined : parsed?.videoCodec.toUpperCase(),
-    parsed?.dynamicRange === 'unknown' ? undefined : parsed?.dynamicRange.toUpperCase(),
+    parsed?.resolution === undefined || parsed.resolution === 'unknown'
+      ? undefined
+      : `🎞️ ${resolutionLabel[parsed.resolution]}`,
+    parsed?.source === undefined || parsed.source === 'unknown'
+      ? undefined
+      : `📺 ${sourceLabel[parsed.source]}`,
+    parsed?.videoCodec === undefined || parsed.videoCodec === 'unknown'
+      ? undefined
+      : `🎥 ${parsed.videoCodec.toUpperCase()}`,
+    parsed?.dynamicRange === undefined || parsed.dynamicRange === 'unknown'
+      ? undefined
+      : `🌈 ${dynamicRangeLabel[parsed.dynamicRange]}`,
   ].filter((value): value is string => value !== undefined);
   const audioLanguages = parsed?.languages.audio ?? [];
   const subtitleLanguages = parsed?.languages.subtitles ?? [];
+  const size = formatSize(result.sizeBytes);
+  const languageSummary = formatLanguages(audioLanguages);
   const firstLine = [
-    ...new Set(audioLanguages.map((language) => language.toUpperCase())),
+    languageSummary === undefined ? undefined : `🎧 ${languageSummary}`,
     ...technical,
-  ].join(' ');
+  ]
+    .filter((value): value is string => value !== undefined)
+    .join(' • ');
   const details = [
-    formatSize(result.sizeBytes),
-    parsed?.audioCodecs
-      .filter((codec) => codec !== 'unknown')
-      .map((codec) => codec.toUpperCase())
-      .join('/'),
+    size === undefined ? undefined : `💾 ${size}`,
+    formatAudio(parsed?.audioCodecs ?? [], parsed?.audioChannels),
     subtitleLanguages.length === 0
       ? undefined
-      : `${[...new Set(subtitleLanguages.map((language) => language.toUpperCase()))].join('/')} subs`,
-    result.seeders === undefined ? undefined : `S:${result.seeders.toString()}`,
-    isTorrentProviderResult(result) && result.cacheStatus === 'cached' ? 'cached' : undefined,
-    isTorrentProviderResult(result) &&
-    torrentPlaybackMode(result, configuration) === 'torbox-only' &&
-    result.cacheStatus === 'uncached'
-      ? '⏳ TorBox download required — open once, then retry'
-      : undefined,
+      : `💬 ${formatLanguages(subtitleLanguages) ?? ''} subtitles`,
+    result.seeders === undefined ? undefined : `🌱 ${result.seeders.toString()}`,
   ].filter((value): value is string => value !== undefined && value.length > 0);
-  const provider = providerLabel[result.provider];
+  const playback = playbackStatus(result, configuration);
+  const provider = `${providerIcon[result.provider]} ${providerLabel[result.provider]}`;
   const resolution = parsed?.resolution === 'unknown' ? undefined : parsed?.resolution;
-  const summary = [firstLine, ...details].filter(Boolean).join(' • ');
+  const summary = [firstLine, ...details, playback].filter(Boolean).join(' • ');
 
   return {
-    name: [provider, resolution].filter(Boolean).join(' '),
+    name: [provider, resolution === undefined ? undefined : resolutionLabel[resolution]]
+      .filter(Boolean)
+      .join(' • '),
     title:
       mode === 'compact'
         ? [result.releaseName, summary].filter(Boolean).join('\n')
-        : [result.releaseName, firstLine, details.join(' • ')].filter(Boolean).join('\n'),
+        : [result.releaseName, firstLine, details.join(' • '), playback].filter(Boolean).join('\n'),
   };
 }
 
@@ -142,11 +148,90 @@ const providerLabel: Readonly<Record<ProviderResult['provider'], string>> = {
   indexers: 'Indexers',
 };
 
+const providerIcon: Readonly<Record<ProviderResult['provider'], string>> = {
+  sktorrent: '🇸🇰',
+  webshare: '☁️',
+  indexers: '🧲',
+};
+
+const resolutionLabel = {
+  '2160p': '4K',
+  '1440p': '1440p',
+  '1080p': '1080p',
+  '720p': '720p',
+  '576p': '576p',
+  '480p': '480p',
+} as const;
+
+const sourceLabel = {
+  remux: 'REMUX',
+  bluray: 'BLURAY',
+  'web-dl': 'WEB-DL',
+  webrip: 'WEBRIP',
+  hdtv: 'HDTV',
+  dvdrip: 'DVDRIP',
+  dvd: 'DVD',
+  cam: 'CAM',
+  ts: 'TS',
+} as const;
+
+const dynamicRangeLabel = {
+  'dolby-vision': 'DOLBY VISION',
+  'hdr10-plus': 'HDR10+',
+  hdr10: 'HDR10',
+  hlg: 'HLG',
+  sdr: 'SDR',
+} as const;
+
+const languageLabel: Readonly<Record<string, string>> = {
+  sk: '🇸🇰 SK',
+  cs: '🇨🇿 CZ',
+  en: '🇬🇧 EN',
+  pl: '🇵🇱 PL',
+  de: '🇩🇪 DE',
+};
+
+const audioCodecLabel: Readonly<Record<string, string>> = {
+  truehd: 'TRUEHD',
+  atmos: 'ATMOS',
+  'dts-x': 'DTS:X',
+  'dts-hd-ma': 'DTS-HD MA',
+  dts: 'DTS',
+  eac3: 'EAC3',
+  ac3: 'AC3',
+  aac: 'AAC',
+};
+
 const torrentPlaybackMode = (
   result: TorrentProviderResult,
   configuration: UserConfiguration,
 ): 'direct-torrent' | 'torbox-only' =>
   result.provider === 'sktorrent' ? configuration.providers.sktorrent.playbackMode : 'torbox-only';
+
+function playbackStatus(result: ProviderResult, configuration: UserConfiguration): string {
+  if (!isTorrentProviderResult(result)) return '☁️ Direct stream';
+  if (torrentPlaybackMode(result, configuration) === 'direct-torrent') return '🧲 Direct P2P';
+  if (result.cacheStatus === 'cached') return '⚡ TorBox • CACHED';
+  if (result.cacheStatus === 'uncached') {
+    return '⬇️ TorBox • UNCACHED • download starts after click';
+  }
+  return '❔ TorBox cache • checked after click';
+}
+
+function formatLanguages(languages: readonly string[]): string | undefined {
+  const values = [...new Set(languages)].map(
+    (language) => languageLabel[language] ?? `🌐 ${language.toUpperCase()}`,
+  );
+  return values.length === 0 ? undefined : values.join(' / ');
+}
+
+function formatAudio(codecs: readonly string[], channels: string | undefined): string | undefined {
+  const values = codecs
+    .filter((codec) => codec !== 'unknown')
+    .map((codec) => audioCodecLabel[codec] ?? codec.toUpperCase());
+  if (values.length === 0 && channels === undefined) return undefined;
+  return `🔊 ${[values.join('/'), channels].filter(Boolean).join(' ')}`;
+}
 
 function formatSize(sizeBytes: number | undefined): string | undefined {
   if (sizeBytes === undefined) return undefined;

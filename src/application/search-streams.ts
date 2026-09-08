@@ -347,7 +347,7 @@ async function searchProviders(
   clock: () => number,
 ): Promise<readonly ProviderResult[]> {
   const enabled = providers.filter(
-    (provider) => configuration.providers[provider.name]?.enabled === true,
+    (provider) => provider.name === 'indexers' || configuration.providers[provider.name].enabled,
   );
   const primaryQueries = selectDistinctTitleQueries(
     queries.filter((query) => query.fallback !== true),

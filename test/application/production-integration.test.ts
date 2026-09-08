@@ -251,7 +251,7 @@ describe('production integration', () => {
     expect(listTorrents).not.toHaveBeenCalled();
   });
 
-  it('assembles SKTorrent, Webshare, and an internal Indexers provider only when enabled', () => {
+  it('assembles user providers and server-managed Indexers only with a user TorBox key', () => {
     const base = configuration();
     const service = configurationService(base);
     const search = vi.fn<StreamProvider['search']>().mockResolvedValue([]);
@@ -262,6 +262,20 @@ describe('production integration', () => {
       configurationService: service,
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(5),
+      indexers: [
+        {
+          backend: 'prowlarr',
+          endpoint: 'https://prowlarr.example/',
+          apiKey: 'server-held-indexers-key',
+          selectedIndexerIds: ['public-fixture'],
+        },
+        {
+          backend: 'jackett',
+          endpoint: 'https://jackett.example/',
+          apiKey: 'server-held-jackett-key',
+          selectedIndexerIds: [],
+        },
+      ],
       factories: {
         tmdbClient: () => ({
           validateAuthentication: vi.fn(),
@@ -301,7 +315,7 @@ describe('production integration', () => {
     expect(webshareProvider).toHaveBeenCalledOnce();
     expect(indexersProvider).not.toHaveBeenCalled();
 
-    const indexersConfiguration: StoredConfiguration = {
+    const torboxConfiguration: StoredConfiguration = {
       ...base,
       updatedAt: '2026-09-06T23:01:00.000Z',
       configuration: {
@@ -309,22 +323,18 @@ describe('production integration', () => {
         providers: {
           sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
           webshare: { enabled: false },
-          indexers: {
-            enabled: true,
-            backend: 'prowlarr',
-            selectedIndexerIds: ['public-fixture'],
-          },
         },
       },
+      credentials: { ...base.credentials, torbox: { apiKey: 'user-torbox-key' } },
     };
-    integration.searchStreamsForConfiguration(indexersConfiguration);
+    integration.searchStreamsForConfiguration(torboxConfiguration);
     expect(sktorrentProvider).toHaveBeenCalledOnce();
     expect(webshareProvider).toHaveBeenCalledOnce();
-    expect(indexersProvider).toHaveBeenCalledOnce();
+    expect(indexersProvider).toHaveBeenCalledTimes(2);
 
     integration.invalidate(base.id);
-    integration.searchStreamsForConfiguration(indexersConfiguration);
-    expect(indexersProvider).toHaveBeenCalledTimes(2);
+    integration.searchStreamsForConfiguration(torboxConfiguration);
+    expect(indexersProvider).toHaveBeenCalledTimes(4);
   });
 });
 

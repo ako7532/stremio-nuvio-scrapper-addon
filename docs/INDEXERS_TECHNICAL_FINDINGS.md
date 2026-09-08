@@ -120,9 +120,15 @@ Critical tests must count all create, create-file, playable-link, and precache c
 
 ## Configuration persistence and runtime invalidation
 
-SQLite currently stores the entire configuration JSON and encrypted credentials without a schema-version column or migration layer. Parsing happens on create/update, while stored JSON is cast during reads. I6 therefore needs a read-time normalization/migration function before strict validation, with Indexers defaulting to disabled for legacy rows. A database table rewrite is not required for this additive configuration change.
+SQLite stores per-user configuration JSON and encrypted user credentials without a schema-version
+column. Indexers were initially implemented there in I6, but the approved post-I7 product correction
+moved Prowlarr/Jackett ownership to server runtime settings, matching the operator-managed scraper model.
+Read-time normalization now strips legacy per-user Indexers settings and credentials without requiring
+a database table rewrite. New public configuration payloads and DTOs contain no Indexers fields.
 
-Credentials are encrypted as one authenticated payload and public DTOs expose only configured/masked status. Indexer backend URL, backend type, selected public indexer IDs, and non-secret preferences belong in configuration; API keys belong in encrypted credentials. Public DTOs must not expose endpoint credentials or acquisition references.
+Backend URL, backend type, API key, and optional indexer IDs now come only from administrator-owned
+environment settings. Enabled backend origins form the exact outbound allowlist. Public DTOs, manifests,
+browser state, logs, and acquisition references must not expose these values.
 
 Production runtimes are cached per configuration ID and `updatedAt` for 30 minutes by default, bounded to 200 entries. Configuration update/revocation already invalidates the runtime and torrent-file namespace. Indexer discovery, capability, search, and acquisition caches must be owned by that runtime so the existing invalidation boundary removes them as well.
 
@@ -133,7 +139,8 @@ Production runtimes are cached per configuration ID and `updatedAt` for 30 minut
 - I3: Prowlarr discovery/search/acquisition client with origin-bound header auth, limits, partial failure, and mock integration tests.
 - I4: Jackett adapter with query auth redaction and fixture-backed discovery/acquisition behavior.
 - I5: production assembly, opaque selected-playback references, TorBox-only eligibility, cross-indexer/source-aware dedup, and critical side-effect tests.
-- I6: backward-compatible configuration normalization, encrypted credentials, endpoint policy, runtime-scoped caches, UI, and connection tests.
+- I6: originally added per-user settings; the approved post-I7 correction replaced them with
+  server-managed environment settings and removed the public UI/discovery surface.
 - I7: SSRF/redirect hardening, observability, deployment and user documentation, full regression gates, and only the available controlled smoke tests.
 
 ## Unverified assumptions and required evidence
@@ -154,8 +161,8 @@ names preserve intentional private-network deployment; link-local/cloud-metadata
 forbidden. Prowlarr redirects are rejected, while Jackett accepts only a validated magnet redirect.
 
 Chunked discovery, capability, search, and acquisition bodies are stopped while streaming as soon as
-their configured byte limit is crossed. Indexers discovery also receives client-disconnect cancellation
-and is rejected by the existing provider-test rate limiter before backend work begins.
+their configured byte limit is crossed. Discovery is now internal to a user-triggered search and
+inherits its cancellation and bounded provider execution policy; no public discovery route remains.
 
 The evidence matrix, cache/observability review, deployment guidance, and remaining live/device checks
 are maintained in [`INDEXERS_PHASE_I7_DOD.md`](./INDEXERS_PHASE_I7_DOD.md).

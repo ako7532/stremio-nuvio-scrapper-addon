@@ -67,6 +67,23 @@ describe('IndexersProvider', () => {
     );
   });
 
+  it('uses up to twenty eligible public indexers when the server selection is empty', async () => {
+    const discovered = [
+      ...Array.from({ length: 25 }, (_, position) => indexer(`public-${String(position + 1)}`)),
+      indexer('private', { privacy: 'private' }),
+    ];
+    const { backend, capabilitiesMock, searchMock } = fakeBackend({ discovered });
+    const provider = createIndexersProvider(backend, { selectedIndexerIds: [] });
+
+    await provider.searchMetadata?.(metadata, context);
+
+    expect(capabilitiesMock).toHaveBeenCalledTimes(20);
+    expect(new Set(searchMock.mock.calls.map(([selected]) => selected.backendId)).size).toBe(20);
+    expect(searchMock.mock.calls.some(([selected]) => selected.backendId === 'private')).toBe(
+      false,
+    );
+  });
+
   it('keeps successful indexers when another indexer fails and bounds concurrency and queries', async () => {
     let active = 0;
     let maximumActive = 0;

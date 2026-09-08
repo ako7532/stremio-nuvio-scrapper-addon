@@ -27,14 +27,6 @@ export type RankingFactor =
   | 'size'
   | 'provider';
 
-export type IndexerBackendType = 'prowlarr' | 'jackett';
-
-export type IndexersConfiguration = {
-  enabled: boolean;
-  backend: IndexerBackendType;
-  selectedIndexerIds: readonly string[];
-};
-
 export type UserConfiguration = {
   general?: {
     metadataLanguage: string;
@@ -45,7 +37,6 @@ export type UserConfiguration = {
       playbackMode: 'direct-torrent' | 'torbox-only';
     };
     webshare: { enabled: boolean };
-    indexers?: IndexersConfiguration;
   };
   filters: {
     resolutions: readonly Resolution[];
@@ -87,7 +78,6 @@ export type ProviderCredentials = {
   sktorrent?: { username: string; password: string };
   webshare?: { username: string; password: string };
   torbox?: { apiKey: string };
-  indexers?: { endpoint: string; apiKey: string };
 };
 
 export type CredentialProvider = keyof ProviderCredentials;

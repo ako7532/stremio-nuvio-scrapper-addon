@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { createIndexerEndpointPolicy } from '../../src/security/indexer-endpoint-policy.js';
@@ -70,6 +73,35 @@ describe('Indexer endpoint policy', () => {
       'forbidden network address',
     );
     expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('supports the Node HTTP all-address lookup contract when using the pinned transport', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.end('ok');
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+
+    try {
+      const address = server.address() as AddressInfo;
+      const origin = `http://127.0.0.1:${String(address.port)}`;
+      const policy = createIndexerEndpointPolicy([origin]);
+
+      const response = await policy.request(new URL('/health', origin));
+
+      expect(response.status).toBe(200);
+      await expect(response.text()).resolves.toBe('ok');
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error === undefined) resolve();
+          else reject(error);
+        });
+      });
+    }
   });
 
   it('treats IPv4-mapped IPv6 loopback as private', async () => {

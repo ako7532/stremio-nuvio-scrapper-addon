@@ -83,13 +83,20 @@ export const createIndexersProvider = (
   ): Promise<readonly TorrentProviderResult[]> => {
     const counters = { queryCount: 0 };
     const discovered = await cachedDiscovery(backend, discoveryCache, context);
-    const byId = new Map(discovered.map((indexer) => [indexer.backendId, indexer]));
-    const eligible = selectedIndexerIds.flatMap((id) => {
-      const indexer = byId.get(id);
-      return indexer !== undefined && isEligiblePublicTorrentIndexer(indexer) ? [indexer] : [];
-    });
+    const publicIndexers = discovered.filter(isEligiblePublicTorrentIndexer);
+    const byId = new Map(publicIndexers.map((indexer) => [indexer.backendId, indexer]));
+    const eligible = (
+      selectedIndexerIds.length === 0
+        ? publicIndexers
+        : selectedIndexerIds.flatMap((id) => {
+            const indexer = byId.get(id);
+            return indexer === undefined ? [] : [indexer];
+          })
+    ).slice(0, MAXIMUM_SELECTED_INDEXERS);
+    const selectedIndexerCount =
+      selectedIndexerIds.length === 0 ? eligible.length : selectedIndexerIds.length;
     if (eligible.length === 0) {
-      observeSummary(options.observer, context, selectedIndexerIds.length, 0, counters, 0, [], []);
+      observeSummary(options.observer, context, selectedIndexerCount, 0, counters, 0, [], []);
       return [];
     }
 
@@ -110,7 +117,7 @@ export const createIndexersProvider = (
       observeSummary(
         options.observer,
         context,
-        selectedIndexerIds.length,
+        selectedIndexerCount,
         eligible.length,
         counters,
         0,
@@ -172,7 +179,7 @@ export const createIndexersProvider = (
       observeSummary(
         options.observer,
         context,
-        selectedIndexerIds.length,
+        selectedIndexerCount,
         eligible.length,
         counters,
         relevant.length,
@@ -185,7 +192,7 @@ export const createIndexersProvider = (
     observeSummary(
       options.observer,
       context,
-      selectedIndexerIds.length,
+      selectedIndexerCount,
       eligible.length,
       counters,
       relevant.length,

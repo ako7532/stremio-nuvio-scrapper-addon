@@ -160,7 +160,7 @@ describe('SearchStreams', () => {
     expect(cacheEnricher.mock.calls[0]?.[0]).toHaveLength(1);
     expect(streams).toEqual([
       expect.objectContaining({
-        name: 'Webshare 1080p',
+        name: '☁️ Webshare • 1080p',
         url: 'https://addon.example/play/opaque-token',
         behaviorHints: { filename: result.filename },
       }),
@@ -384,11 +384,6 @@ describe('SearchStreams', () => {
       providers: {
         sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
         webshare: { enabled: false },
-        indexers: {
-          enabled: true,
-          backend: 'prowlarr',
-          selectedIndexerIds: ['public-fixture'],
-        },
       },
     };
     const withoutTorbox = createSearchStreams({

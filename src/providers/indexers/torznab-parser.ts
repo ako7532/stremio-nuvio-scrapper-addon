@@ -23,6 +23,7 @@ export type TorznabParserLimits = {
 const DEFAULT_MAXIMUM_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAXIMUM_ITEMS = 100;
 const MAXIMUM_TEXT_LENGTH = 2_048;
+const MAXIMUM_REFERENCE_LENGTH = 4_096;
 
 export const parseTorznabCapabilities = (
   xml: string,
@@ -71,8 +72,8 @@ export const parseTorznabResults = (
     const attributes = parseAttributes($, item);
     const declaredInfoHash = singleAttribute(attributes, 'infohash');
     const attributeMagnet = singleAttribute(attributes, 'magneturl');
-    const enclosure = optionalChildAttribute(item, 'enclosure', 'url');
-    const link = optionalChildText(item, 'link');
+    const enclosure = optionalChildAttribute(item, 'enclosure', 'url', MAXIMUM_REFERENCE_LENGTH);
+    const link = optionalChildText(item, 'link', MAXIMUM_REFERENCE_LENGTH);
     const magnetUri = attributeMagnet ?? [enclosure, link].find(isMagnet);
     let infoHash: string | undefined;
     try {
@@ -153,9 +154,13 @@ const parseAttributes = (
     const node = $(element);
     const attributeName = node.attr('name')?.trim().toLowerCase();
     const value = node.attr('value')?.trim();
-    if (attributeName === undefined || value === undefined || value.length === 0) {
-      throw malformed('Torznab attribute is incomplete');
-    }
+    if (
+      attributeName === undefined ||
+      attributeName.length === 0 ||
+      value === undefined ||
+      value.length === 0
+    )
+      continue;
     if (attributeName.length > 100 || value.length > MAXIMUM_TEXT_LENGTH) {
       throw malformed('Torznab attribute exceeds its limit');
     }
@@ -186,27 +191,31 @@ const requiredChildText = (node: ReturnType<cheerio.CheerioAPI>, selector: strin
 const optionalChildText = (
   node: ReturnType<cheerio.CheerioAPI>,
   selector: string,
+  maximumLength = MAXIMUM_TEXT_LENGTH,
 ): string | undefined => {
   const children = node.children(selector);
   if (children.length > 1) throw malformed(`Torznab ${selector} is duplicated`);
   if (children.length === 0) return undefined;
   const value = children.text().trim();
-  return value.length === 0 ? undefined : bounded(value, selector);
+  return value.length === 0 ? undefined : bounded(value, selector, maximumLength);
 };
 
 const optionalChildAttribute = (
   node: ReturnType<cheerio.CheerioAPI>,
   selector: string,
   attribute: string,
+  maximumLength = MAXIMUM_TEXT_LENGTH,
 ): string | undefined => {
   const children = node.children(selector);
   if (children.length > 1) throw malformed(`Torznab ${selector} is duplicated`);
   const value = children.attr(attribute)?.trim();
-  return value === undefined || value.length === 0 ? undefined : bounded(value, selector);
+  return value === undefined || value.length === 0
+    ? undefined
+    : bounded(value, selector, maximumLength);
 };
 
-const bounded = (value: string, name: string): string => {
-  if (value.length > MAXIMUM_TEXT_LENGTH) throw malformed(`Torznab ${name} exceeds its limit`);
+const bounded = (value: string, name: string, maximumLength = MAXIMUM_TEXT_LENGTH): string => {
+  if (value.length > maximumLength) throw malformed(`Torznab ${name} exceeds its limit`);
   return value;
 };
 

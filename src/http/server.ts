@@ -16,10 +16,7 @@ import {
 import type { ConfigurationService } from '../application/configuration-service.js';
 import { parseConfigurationId } from '../application/configuration-service.js';
 import type { StoredConfiguration } from '../application/configuration-store.js';
-import type {
-  IndexerConnectionDiscovery,
-  ProviderConnectionTester,
-} from '../application/provider-connection-tester.js';
+import type { ProviderConnectionTester } from '../application/provider-connection-tester.js';
 import type { SearchStreams } from '../application/search-streams.js';
 import {
   PlaybackResolveError,
@@ -77,17 +74,6 @@ const providerTestSchema = z.strictObject({
     .nullable()
     .optional(),
 });
-const indexerDiscoverySchema = z.strictObject({
-  configurationId: z.string().optional(),
-  backend: z.enum(['prowlarr', 'jackett']).optional(),
-  indexers: z
-    .strictObject({
-      endpoint: z.url().max(2_048),
-      apiKey: z.string().trim().min(1).max(1_024),
-    })
-    .nullable()
-    .optional(),
-});
 const corsRoutes = new Set([
   '/manifest.json',
   '/stream/:type/:id.json',
@@ -109,7 +95,6 @@ export type ServerOptions = {
   searchStreamsForConfiguration?: (configuration: StoredConfiguration) => SearchStreams | undefined;
   invalidateConfigurationRuntime?: (configId: string) => void;
   providerConnectionTester?: ProviderConnectionTester;
-  indexerConnectionDiscovery?: IndexerConnectionDiscovery;
   publicBaseUrl?: string;
   rateLimiters?: Partial<ServerRateLimiters>;
   trustProxy?: boolean;
@@ -290,45 +275,6 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         undefined,
       );
       return { status: 'ok' as const };
-    } catch (error) {
-      return sendApplicationError(reply, classifyApplicationError(error, 'ProviderUnavailable'));
-    }
-  });
-  server.post('/api/indexers/discover', async (request, reply) => {
-    const body = indexerDiscoverySchema.safeParse(request.body);
-    if (!body.success || options.indexerConnectionDiscovery === undefined) {
-      return reply.code(400).send({ error: 'Invalid Indexers discovery request' });
-    }
-    if (!consumeRateLimit(rateLimiters.providerTest, `${request.ip}:indexers`, reply)) return;
-    const configurationId =
-      body.data.configurationId === undefined
-        ? undefined
-        : parseConfigurationId(body.data.configurationId);
-    if (body.data.configurationId !== undefined && configurationId === undefined) {
-      return reply.code(400).send({ error: 'Invalid Indexers discovery request' });
-    }
-    const stored =
-      configurationId === undefined || options.configurationService === undefined
-        ? undefined
-        : await options.configurationService.getStored(configurationId);
-    const submitted = body.data.indexers;
-    const credential = submitted === null ? undefined : (submitted ?? stored?.credentials.indexers);
-    const backend = body.data.backend ?? stored?.configuration.providers.indexers?.backend;
-    if (credential === undefined || backend === undefined) {
-      return reply.code(400).send({ error: 'Indexers connection settings are required' });
-    }
-    const controller = new AbortController();
-    request.raw.once('aborted', () => {
-      controller.abort();
-    });
-    try {
-      const indexers = await options.indexerConnectionDiscovery(
-        backend,
-        credential,
-        stored?.configuration.advanced?.providerTimeoutMs ?? 8_000,
-        controller.signal,
-      );
-      return { status: 'ok' as const, indexers };
     } catch (error) {
       return sendApplicationError(reply, classifyApplicationError(error, 'ProviderUnavailable'));
     }

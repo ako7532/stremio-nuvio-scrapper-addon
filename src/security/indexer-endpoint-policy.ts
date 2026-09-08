@@ -212,8 +212,9 @@ const pinnedRequest = async (
       {
         method,
         headers: Object.fromEntries(new Headers(init.headers)),
-        lookup: (_hostname, _options, callback) => {
-          callback(null, resolved.address, resolved.family);
+        lookup: (_hostname, lookupOptions, callback) => {
+          if (lookupOptions.all) callback(null, [resolved]);
+          else callback(null, resolved.address, resolved.family);
         },
         ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
       },

@@ -22,19 +22,18 @@ import { createIndexerEndpointPolicy } from '../../src/security/indexer-endpoint
 const GIB = 1_073_741_824;
 const selectedHash = '1'.repeat(40);
 const torrentBytes = Uint8Array.from([100, 49, 58, 97, 101]);
+const serverIndexer = {
+  backend: 'prowlarr' as const,
+  endpoint: 'https://prowlarr.example/base/',
+  apiKey: 'indexers-key-fixture',
+  selectedIndexerIds: ['public-fixture'],
+};
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Indexers production integration', () => {
   it('assembles the configured Prowlarr backend without an injected factory', async () => {
     const stored = configuration({ showUncached: false });
-    stored.credentials.indexers = {
-      endpoint: 'https://prowlarr.example/base/',
-      apiKey: 'indexers-key-fixture',
-    };
-    if (stored.configuration.providers.indexers !== undefined) {
-      stored.configuration.providers.indexers.selectedIndexerIds = ['1'];
-    }
     const discoveryFixture = await fixture('prowlarr-indexers.json');
     const capabilitiesFixture = await fixture('caps.xml');
     const searchFixture = await fixture('search.xml');
@@ -48,6 +47,7 @@ describe('Indexers production integration', () => {
       configurationService: configurationService(stored),
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(4),
+      indexers: [{ ...serverIndexer, selectedIndexerIds: ['1'] }],
       indexerEndpointPolicy: createIndexerEndpointPolicy(['https://prowlarr.example'], {
         lookup: () => Promise.resolve([{ address: '203.0.113.10', family: 4 }]),
         connect: (url, init) => fetchMock(url, init),
@@ -109,6 +109,7 @@ describe('Indexers production integration', () => {
       configurationService: configurationService(stored),
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(6),
+      indexers: [serverIndexer],
       factories: {
         tmdbClient: () => tmdbClient('Sintel', 2010),
         indexersProvider: (_configuration, _timeoutMs, dependencies) =>
@@ -254,6 +255,7 @@ describe('Indexers production integration', () => {
       configurationService: configurationService(stored),
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(8),
+      indexers: [serverIndexer],
       factories: {
         tmdbClient: () => tmdbClient('Fixture Show', 2020),
         indexersProvider: () => indexers,
@@ -305,11 +307,6 @@ function configuration(
       providers: {
         sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
         webshare: { enabled: false },
-        indexers: {
-          enabled: true,
-          backend: 'prowlarr',
-          selectedIndexerIds: ['public-fixture'],
-        },
       },
       torbox: { ...defaults.torbox, ...torboxOverrides },
     },

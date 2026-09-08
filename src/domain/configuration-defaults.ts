@@ -7,7 +7,6 @@ export const defaultConfiguration = (): UserConfiguration => ({
   providers: {
     sktorrent: { enabled: true, playbackMode: 'direct-torrent' },
     webshare: { enabled: true },
-    indexers: { enabled: false, backend: 'prowlarr', selectedIndexerIds: [] },
   },
   filters: {
     resolutions: [...resolutions],

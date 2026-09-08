@@ -60,14 +60,7 @@ describe('aggregation pipeline stages', () => {
       { ...torrent('b'.repeat(40), 'Movie.1080p.WEB-DL.EN.mkv'), provider: 'indexers' },
       90,
     );
-    const providerConfiguration: UserConfiguration = {
-      ...configuration,
-      providers: {
-        ...configuration.providers,
-        indexers: { enabled: true, backend: 'prowlarr', selectedIndexerIds: ['public-fixture'] },
-      },
-      ranking: ['provider'],
-    };
+    const providerConfiguration: UserConfiguration = { ...configuration, ranking: ['provider'] };
 
     expect(
       rankResults([indexers, sktorrent], providerConfiguration).map(

@@ -5,17 +5,29 @@ metadata, providers, caches, and playback dependencies for configured stream rou
 
 ## Required environment
 
-| Variable                  | Required   | Default                 | Purpose                                                                          |
-| ------------------------- | ---------- | ----------------------- | -------------------------------------------------------------------------------- |
-| `CONFIG_ENCRYPTION_KEY`   | Yes        | none                    | Stable base64-encoded 32-byte key used to encrypt per-user provider credentials. |
-| `ADDON_BASE_URL`          | Production | `http://127.0.0.1:7000` | Public HTTPS base URL placed in generated manifest links.                        |
-| `CONFIG_DATABASE_PATH`    | No         | `addon.sqlite`          | SQLite file; the container defaults to `/data/addon.sqlite`.                     |
-| `INDEXER_ALLOWED_ORIGINS` | Indexers   | empty                   | Exact comma-separated Prowlarr/Jackett origins; empty disables Indexers.         |
-| `HOST`                    | No         | `0.0.0.0`               | Listen address.                                                                  |
-| `PORT`                    | No         | `7000`                  | Listen port.                                                                     |
-| `LOG_LEVEL`               | No         | `info`                  | Pino level from `fatal` through `trace`, or `silent`.                            |
-| `TRUST_PROXY`             | No         | `false`                 | Trust forwarded client addresses only behind a controlled reverse proxy.         |
-| `SHUTDOWN_TIMEOUT_MS`     | No         | `10000`                 | Forced-shutdown deadline, from 1 to 60 seconds.                                  |
+| Variable                | Required   | Default                 | Purpose                                                                          |
+| ----------------------- | ---------- | ----------------------- | -------------------------------------------------------------------------------- |
+| `CONFIG_ENCRYPTION_KEY` | Yes        | none                    | Stable base64-encoded 32-byte key used to encrypt per-user provider credentials. |
+| `ADDON_BASE_URL`        | Production | `http://127.0.0.1:7000` | Public HTTPS base URL placed in generated manifest links.                        |
+| `CONFIG_DATABASE_PATH`  | No         | `addon.sqlite`          | SQLite file; the container defaults to `/data/addon.sqlite`.                     |
+| `HOST`                  | No         | `0.0.0.0`               | Listen address.                                                                  |
+| `PORT`                  | No         | `7000`                  | Listen port.                                                                     |
+| `LOG_LEVEL`             | No         | `info`                  | Pino level from `fatal` through `trace`, or `silent`.                            |
+| `TRUST_PROXY`           | No         | `false`                 | Trust forwarded client addresses only behind a controlled reverse proxy.         |
+| `SHUTDOWN_TIMEOUT_MS`   | No         | `10000`                 | Forced-shutdown deadline, from 1 to 60 seconds.                                  |
+
+Server-managed Public Indexers use these settings:
+
+| Variable            | Default                 | Purpose                                                          |
+| ------------------- | ----------------------- | ---------------------------------------------------------------- |
+| `SCRAPE_PROWLARR`   | `false`                 | Enable the server's Prowlarr scraper.                            |
+| `PROWLARR_URL`      | `http://127.0.0.1:9696` | Administrator-controlled Prowlarr endpoint.                      |
+| `PROWLARR_API_KEY`  | none                    | Required when Prowlarr is enabled.                               |
+| `PROWLARR_INDEXERS` | `[]`                    | JSON array of IDs; empty uses up to 20 eligible public trackers. |
+| `SCRAPE_JACKETT`    | `false`                 | Enable the server's Jackett scraper.                             |
+| `JACKETT_URL`       | `http://127.0.0.1:9117` | Administrator-controlled Jackett endpoint.                       |
+| `JACKETT_API_KEY`   | none                    | Required when Jackett is enabled.                                |
+| `JACKETT_INDEXERS`  | `[]`                    | JSON array of IDs; empty uses up to 20 eligible public trackers. |
 
 Generate the encryption key locally and store it in a secrets manager:
 
@@ -44,14 +56,17 @@ Back up the SQLite database and encryption key together; either one without the 
 
 ## Prowlarr or Jackett on a private Docker network
 
-Attach the addon and one backend to the same Compose network. The addon endpoint entered in the UI may
-contain a path prefix, but the allowlist contains only the exact origin:
+Attach the addon and its server-managed backend to the same Compose network. The backend URL may contain
+a path prefix. Keep the API key in the deployment secret environment and never in the addon UI:
 
 ```yaml
 services:
   addon:
     environment:
-      INDEXER_ALLOWED_ORIGINS: http://prowlarr:9696
+      SCRAPE_PROWLARR: 'true'
+      PROWLARR_URL: http://prowlarr:9696
+      PROWLARR_API_KEY: ${PROWLARR_API_KEY:?Set PROWLARR_API_KEY}
+      PROWLARR_INDEXERS: ${PROWLARR_INDEXERS:-[]}
     networks: [indexers]
 
   prowlarr:
@@ -76,13 +91,15 @@ The image names and default ports follow the
 [Prowlarr container documentation](https://docs.linuxserver.io/images/docker-prowlarr/) and
 [Jackett container documentation](https://github.com/linuxserver/docker-jackett/blob/master/README.md).
 
-For a backend behind a controlled HTTPS reverse proxy, allowlist only its public origin, for example
-`https://indexers.example`. Public FQDNs resolving to private addresses are rejected; use an explicit
-private IP, `localhost`, or a single-label Docker service name when private routing is intentional.
+For a backend behind a controlled HTTPS reverse proxy, configure its exact administrator-owned URL.
+Public FQDNs resolving to private addresses are rejected; use an explicit private IP, `localhost`, or a
+single-label Docker service name when private routing is intentional. The addon derives the outbound
+origin allowlist from enabled backend URLs and pins each connection to a validated address.
 
-After deployment, the user flow is: open `/configure`, enable Public Indexers, choose the backend, enter
-the endpoint and API key, discover and select public indexers, **Save configuration**, then **Install in
-Stremio**. Indexers remains public-only and TorBox-only.
+Prowlarr and Jackett may both be enabled. Configure tracker membership in those administrator tools,
+not in `/configure`. The normal user only supplies their TorBox credential and follows **Save
+configuration**, then **Install in Stremio**. Server-managed Indexers is automatically available to
+that user and remains public-only and TorBox-only.
 
 ## Reverse proxy
 

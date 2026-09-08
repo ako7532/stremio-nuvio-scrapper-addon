@@ -23,6 +23,7 @@ import { createSktorrentSource } from '../providers/sktorrent/sktorrent-source.j
 import { createIndexersProvider } from '../providers/indexers/indexers-provider.js';
 import { createJackettBackend } from '../providers/indexers/jackett-backend.js';
 import { createProwlarrBackend } from '../providers/indexers/prowlarr-backend.js';
+import type { ServerIndexerConfiguration } from '../providers/indexers/server-indexer-configuration.js';
 import { createTorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import type { TorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import { createWebshareApiClient } from '../providers/webshare/webshare-api-client.js';
@@ -48,6 +49,7 @@ export type ProductionIntegrationOptions = {
   clock?: () => number;
   observer?: SearchObserver;
   indexerEndpointPolicy?: IndexerEndpointPolicy;
+  indexers?: readonly ServerIndexerConfiguration[];
   factories?: {
     tmdbClient?: (accessToken: string, timeoutMs: number) => TmdbClient;
     sktorrentProvider?: (
@@ -62,6 +64,7 @@ export type ProductionIntegrationOptions = {
       configuration: StoredConfiguration,
       timeoutMs: number,
       dependencies: IndexersProviderFactoryDependencies,
+      serverConfiguration?: ServerIndexerConfiguration,
     ) => StreamProvider | undefined;
     torboxClient?: (apiKey: string, timeoutMs: number) => TorboxApiClient;
   };
@@ -224,28 +227,32 @@ const assembleSearch = (
       );
     }
   }
-  if (stored.configuration.providers.indexers?.enabled === true) {
-    const injected = options.factories?.indexersProvider?.(stored, timeoutMs, {
-      torrentFiles: { store: torrentFiles, namespace: stored.id },
-      ...(observer === undefined ? {} : { observer }),
-    });
-    if (injected !== undefined) providers.push(injected);
-    else {
-      const credential = stored.credentials.indexers;
-      const configuration = stored.configuration.providers.indexers;
-      if (credential !== undefined && options.indexerEndpointPolicy !== undefined) {
-        options.indexerEndpointPolicy.assertAllowed(credential.endpoint);
+  const torboxCredential = stored.credentials.torbox;
+  if (torboxCredential !== undefined) {
+    for (const configuration of options.indexers ?? []) {
+      const injected = options.factories?.indexersProvider?.(
+        stored,
+        timeoutMs,
+        {
+          torrentFiles: { store: torrentFiles, namespace: stored.id },
+          ...(observer === undefined ? {} : { observer }),
+        },
+        configuration,
+      );
+      if (injected !== undefined) providers.push(injected);
+      else if (options.indexerEndpointPolicy !== undefined) {
+        options.indexerEndpointPolicy.assertAllowed(configuration.endpoint);
         const backend =
           configuration.backend === 'prowlarr'
             ? createProwlarrBackend({
-                baseUrl: credential.endpoint,
-                apiKey: credential.apiKey,
+                baseUrl: configuration.endpoint,
+                apiKey: configuration.apiKey,
                 timeoutMs,
                 fetch: options.indexerEndpointPolicy.request,
               })
             : createJackettBackend({
-                baseUrl: credential.endpoint,
-                apiKey: credential.apiKey,
+                baseUrl: configuration.endpoint,
+                apiKey: configuration.apiKey,
                 timeoutMs,
                 fetch: options.indexerEndpointPolicy.request,
               });
@@ -259,7 +266,6 @@ const assembleSearch = (
       }
     }
   }
-  const torboxCredential = stored.credentials.torbox;
   const torboxClient =
     torboxCredential === undefined
       ? undefined

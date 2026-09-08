@@ -23,10 +23,6 @@ describe('SQLite configuration store', () => {
       configuration: defaultConfiguration(),
       credentials: {
         torbox: { apiKey: 'database-private-key' },
-        indexers: {
-          endpoint: 'https://indexers.internal.invalid/base',
-          apiKey: 'database-indexers-private-key',
-        },
       },
       createdAt: '2026-09-06T00:00:00.000Z',
       updatedAt: '2026-09-06T00:00:00.000Z',
@@ -42,9 +38,6 @@ describe('SQLite configuration store', () => {
       .get(value.id) as { configuration_json: string; encrypted_credentials: string };
     expect(row.configuration_json).not.toContain('database-private-key');
     expect(row.encrypted_credentials).not.toContain('database-private-key');
-    expect(row.configuration_json).not.toContain('indexers.internal.invalid');
-    expect(row.encrypted_credentials).not.toContain('indexers.internal.invalid');
-    expect(row.encrypted_credentials).not.toContain('database-indexers-private-key');
     expect(row.encrypted_credentials).toMatch(/^v1\./u);
     database.close();
     rmSync(directory, { recursive: true, force: true });
@@ -55,31 +48,41 @@ describe('SQLite configuration store', () => {
     const filename = join(directory, 'config.sqlite');
     const cipher = createCredentialCipher(randomBytes(32).toString('base64'));
     const store = createSqliteConfigurationStore(filename, cipher);
-    const configuration = defaultConfiguration();
-    delete configuration.providers.indexers;
-    const legacy: StoredConfiguration = {
+    const defaults = defaultConfiguration();
+    const legacy = {
       id: 'legacy-sqlite-configuration-fixture',
-      configuration,
-      credentials: {},
-      createdAt: '2026-09-06T00:00:00.000Z',
-      updatedAt: '2026-09-06T00:00:00.000Z',
-    };
-    await store.save(legacy);
-
-    await expect(createConfigurationService(store).getStored(legacy.id)).resolves.toMatchObject({
       configuration: {
+        ...defaults,
         providers: {
-          indexers: { enabled: false, backend: 'prowlarr', selectedIndexerIds: [] },
+          ...defaults.providers,
+          indexers: {
+            enabled: true,
+            backend: 'prowlarr',
+            selectedIndexerIds: ['public-fixture'],
+          },
         },
       },
-    });
+      credentials: {
+        indexers: {
+          endpoint: 'https://legacy-indexers.invalid/base',
+          apiKey: 'legacy-indexers-key-fixture',
+        },
+      },
+      createdAt: '2026-09-06T00:00:00.000Z',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+    } as unknown as StoredConfiguration;
+    await store.save(legacy);
+
+    const normalized = await createConfigurationService(store).getStored(legacy.id);
+    expect(normalized?.configuration.providers).not.toHaveProperty('indexers');
+    expect(normalized?.credentials).not.toHaveProperty('indexers');
 
     store.close?.();
     const database = new DatabaseSync(filename, { readOnly: true });
     const row = database
       .prepare('SELECT configuration_json FROM configurations WHERE id = ?')
       .get(legacy.id) as { configuration_json: string };
-    expect(row.configuration_json).not.toContain('indexers');
+    expect(row.configuration_json).toContain('indexers');
     database.close();
     rmSync(directory, { recursive: true, force: true });
   });
