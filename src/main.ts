@@ -3,13 +3,17 @@ import { createHmac } from 'node:crypto';
 import { createConfigurationService } from './application/configuration-service.js';
 import { createProductionIntegration } from './application/production-integration.js';
 import type { SearchObserver } from './application/search-observability.js';
-import { testProviderConnection } from './application/provider-connection-tester.js';
+import {
+  createIndexerConnectionDiscovery,
+  testProviderConnection,
+} from './application/provider-connection-tester.js';
 import { createCredentialCipher } from './infrastructure/credential-cipher.js';
 import { parseEnvironment } from './infrastructure/environment.js';
 import { installGracefulShutdown } from './infrastructure/graceful-shutdown.js';
 import { createSearchLogObserver } from './infrastructure/search-logger.js';
 import { createSqliteConfigurationStore } from './infrastructure/sqlite-configuration-store.js';
 import { buildServer } from './http/server.js';
+import { createIndexerEndpointPolicy } from './security/indexer-endpoint-policy.js';
 
 const environment = parseEnvironment(process.env);
 if (environment.CONFIG_ENCRYPTION_KEY === undefined) {
@@ -19,7 +23,8 @@ const store = createSqliteConfigurationStore(
   environment.CONFIG_DATABASE_PATH,
   createCredentialCipher(environment.CONFIG_ENCRYPTION_KEY),
 );
-const configurationService = createConfigurationService(store);
+const indexerEndpointPolicy = createIndexerEndpointPolicy(environment.INDEXER_ALLOWED_ORIGINS);
+const configurationService = createConfigurationService(store, { indexerEndpointPolicy });
 const playbackSecret = createHmac('sha256', environment.CONFIG_ENCRYPTION_KEY)
   .update('stremio-nuvio-addon/playback-token/v1')
   .digest();
@@ -29,6 +34,7 @@ const integration = createProductionIntegration({
   baseUrl: environment.ADDON_BASE_URL,
   playbackSecret,
   observer: (event) => searchObserver.current?.(event),
+  indexerEndpointPolicy,
 });
 const server = buildServer({
   logger: true,
@@ -41,6 +47,9 @@ const server = buildServer({
     integration.invalidate(configId);
   },
   providerConnectionTester: testProviderConnection,
+  indexerConnectionDiscovery: createIndexerConnectionDiscovery({
+    endpointPolicy: indexerEndpointPolicy,
+  }),
   publicBaseUrl: environment.ADDON_BASE_URL,
   trustProxy: environment.TRUST_PROXY,
 });

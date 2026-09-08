@@ -10,6 +10,7 @@ import type {
 import type { SearchStreams } from '../../src/application/search-streams.js';
 import { defaultConfiguration } from '../../src/domain/configuration-defaults.js';
 import { buildServer } from '../../src/http/server.js';
+import { createIndexerEndpointPolicy } from '../../src/security/indexer-endpoint-policy.js';
 
 const servers: ReturnType<typeof buildServer>[] = [];
 
@@ -40,6 +41,9 @@ describe('configuration HTTP API', () => {
     expect(response.body).toContain('perResolution=perQualityValue');
     expect(response.body).toContain('name="safeDebug" type="checkbox"');
     expect(response.body).toContain("safeDebug:field('safeDebug').checked");
+    expect(response.body).toContain('name="indexersEnabled"');
+    expect(response.body).toContain("selectedIndexerIds:checked('selectedIndexerIds')");
+    expect(response.body).toContain('/api/indexers/discover');
     expect(response.body).toContain('target="_blank" rel="noreferrer"');
     expect(response.body).not.toContain('server-held-fixture-key');
     const nonce = /<script nonce="([^"]+)">/u.exec(response.body)?.[1] ?? '';
@@ -53,11 +57,155 @@ describe('configuration HTTP API', () => {
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
+  it('normalizes legacy settings and keeps Indexers connection secrets server-side', async () => {
+    const store = memoryStore();
+    const service = createConfigurationService(store, {
+      indexerEndpointPolicy: createIndexerEndpointPolicy(['https://indexers.invalid']),
+    });
+    const legacyConfiguration = defaultConfiguration();
+    delete legacyConfiguration.providers.indexers;
+    const legacy: StoredConfiguration = {
+      id: 'legacy-configuration-fixture-123',
+      configuration: legacyConfiguration,
+      credentials: {},
+      createdAt: '2026-09-06T00:00:00.000Z',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+    };
+    store.values.set(legacy.id, legacy);
+
+    await expect(service.getStored(legacy.id)).resolves.toMatchObject({
+      configuration: {
+        providers: {
+          indexers: { enabled: false, backend: 'prowlarr', selectedIndexerIds: [] },
+        },
+      },
+    });
+
+    const endpoint = 'https://indexers.invalid/prowlarr';
+    const apiKey = 'indexers-api-key-fixture';
+    const configuration = defaultConfiguration();
+    configuration.providers.indexers = {
+      enabled: true,
+      backend: 'jackett',
+      selectedIndexerIds: ['public-one', 'public-two'],
+    };
+    await expect(
+      service.create(
+        { configuration, credentials: { indexers: { endpoint, apiKey } } },
+        'https://addon.example',
+      ),
+    ).rejects.toMatchObject({ kind: 'InvalidConfiguration' });
+    const created = await service.create(
+      {
+        configuration,
+        credentials: {
+          indexers: { endpoint, apiKey },
+          torbox: { apiKey: 'torbox-key-fixture' },
+        },
+      },
+      'https://addon.example',
+    );
+
+    expect(created.configuration.providers.indexers).toEqual(configuration.providers.indexers);
+    expect(created.credentials.indexers).toEqual({ configured: true });
+    expect(JSON.stringify(created)).not.toContain(endpoint);
+    expect(JSON.stringify(created)).not.toContain(apiKey);
+    expect(store.values.get(created.id)?.credentials.indexers).toEqual({ endpoint, apiKey });
+
+    await service.update(
+      created.id,
+      { configuration: defaultConfiguration(), credentials: {} },
+      'https://addon.example',
+    );
+    expect(store.values.get(created.id)?.credentials.indexers).toEqual({ endpoint, apiKey });
+
+    const replacement = {
+      endpoint: 'https://indexers.invalid/jackett',
+      apiKey: 'replacement-indexers-key-fixture',
+    };
+    await service.update(
+      created.id,
+      {
+        configuration: defaultConfiguration(),
+        credentials: { indexers: replacement },
+      },
+      'https://addon.example',
+    );
+    expect(store.values.get(created.id)?.credentials.indexers).toEqual(replacement);
+
+    const removed = await service.update(
+      created.id,
+      { configuration: defaultConfiguration(), credentials: { indexers: null } },
+      'https://addon.example',
+    );
+    expect(removed?.credentials.indexers).toEqual({ configured: false });
+    expect(store.values.get(created.id)?.credentials.indexers).toBeUndefined();
+  });
+
+  it('discovers Indexers through stored or submitted credentials without returning secrets', async () => {
+    const store = memoryStore();
+    const service = createConfigurationService(store);
+    const configuration = defaultConfiguration();
+    configuration.providers.indexers = {
+      enabled: false,
+      backend: 'jackett',
+      selectedIndexerIds: [],
+    };
+    const stored: StoredConfiguration = {
+      id: 'indexers-discovery-fixture-12345',
+      configuration,
+      credentials: {
+        indexers: {
+          endpoint: 'https://stored-indexers.invalid/base',
+          apiKey: 'stored-indexers-key-fixture',
+        },
+      },
+      createdAt: '2026-09-08T00:00:00.000Z',
+      updatedAt: '2026-09-08T00:00:00.000Z',
+    };
+    store.values.set(stored.id, stored);
+    const indexerConnectionDiscovery = vi.fn().mockResolvedValue([
+      {
+        id: 'public-fixture',
+        name: 'Public fixture',
+        status: 'available',
+        capabilities: { movie: true, series: true, generic: true },
+      },
+    ]);
+    const server = buildServer({
+      configurationService: service,
+      indexerConnectionDiscovery,
+    });
+    servers.push(server);
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/indexers/discover',
+      payload: { configurationId: stored.id },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'ok',
+      indexers: [{ id: 'public-fixture', status: 'available' }],
+    });
+    expect(indexerConnectionDiscovery).toHaveBeenCalledWith(
+      'jackett',
+      stored.credentials.indexers,
+      8_000,
+      undefined,
+    );
+    expect(response.body).not.toContain('stored-indexers-key-fixture');
+    expect(response.body).not.toContain('stored-indexers.invalid');
+  });
+
   it('creates, safely reads, updates, and revokes an opaque configuration', async () => {
     const store = memoryStore();
+    const invalidateConfigurationRuntime = vi.fn();
     const server = buildServer({
       configurationService: createConfigurationService(store),
       publicBaseUrl: 'https://addon.example/base/',
+      invalidateConfigurationRuntime,
     });
     servers.push(server);
     const secret = 'server-held-fixture-key';
@@ -113,12 +261,14 @@ describe('configuration HTTP API', () => {
     });
     expect(updated.json()).toMatchObject({ credentials: { torbox: { configured: false } } });
     expect(store.values.get(publicValue.id)?.credentials.torbox).toBeUndefined();
+    expect(invalidateConfigurationRuntime).toHaveBeenCalledWith(publicValue.id);
 
     const revoked = await server.inject({
       method: 'DELETE',
       url: `/api/configurations/${publicValue.id}`,
     });
     expect(revoked.json()).toEqual({ revoked: true });
+    expect(invalidateConfigurationRuntime).toHaveBeenCalledTimes(2);
     expect(
       (await server.inject({ method: 'GET', url: `/${publicValue.id}/manifest.json` })).statusCode,
     ).toBe(404);

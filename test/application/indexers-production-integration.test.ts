@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConfigurationService } from '../../src/application/configuration-service.js';
 import type { StoredConfiguration } from '../../src/application/configuration-store.js';
@@ -15,12 +17,57 @@ import type {
 import type { TorboxApiClient } from '../../src/providers/torbox/torbox-api-client.js';
 import { parseRelease } from '../../src/release/release-parser.js';
 import { buildServer } from '../../src/http/server.js';
+import { createIndexerEndpointPolicy } from '../../src/security/indexer-endpoint-policy.js';
 
 const GIB = 1_073_741_824;
 const selectedHash = '1'.repeat(40);
 const torrentBytes = Uint8Array.from([100, 49, 58, 97, 101]);
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe('Indexers production integration', () => {
+  it('assembles the configured Prowlarr backend without an injected factory', async () => {
+    const stored = configuration({ showUncached: false });
+    stored.credentials.indexers = {
+      endpoint: 'https://prowlarr.example/base/',
+      apiKey: 'indexers-key-fixture',
+    };
+    if (stored.configuration.providers.indexers !== undefined) {
+      stored.configuration.providers.indexers.selectedIndexerIds = ['1'];
+    }
+    const discoveryFixture = await fixture('prowlarr-indexers.json');
+    const capabilitiesFixture = await fixture('caps.xml');
+    const searchFixture = await fixture('search.xml');
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(discoveryFixture, 'application/json'))
+      .mockResolvedValueOnce(response(capabilitiesFixture, 'application/xml'))
+      .mockResolvedValue(response(searchFixture, 'application/rss+xml'));
+    vi.stubGlobal('fetch', fetchMock);
+    const integration = createProductionIntegration({
+      configurationService: configurationService(stored),
+      baseUrl: 'https://addon.example/',
+      playbackSecret: new Uint8Array(32).fill(4),
+      indexerEndpointPolicy: createIndexerEndpointPolicy(['https://prowlarr.example']),
+      factories: { tmdbClient: () => tmdbClient('Fixture Movie', 2024) },
+    });
+
+    const streams = await integration
+      .searchStreamsForConfiguration(stored)
+      .search(
+        { type: 'movie', id: 'tt0000044' },
+        { signal: new AbortController().signal, correlationId: 'configured-indexers-search' },
+      );
+
+    expect(streams).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.every(
+        ([url]) => !requestUrl(url).toString().includes('indexers-key-fixture'),
+      ),
+    ).toBe(true);
+  });
+
   it('keeps search and HEAD read-only and uses acquired metainfo on the first selected GET', async () => {
     const stored = configuration({ showUncached: true });
     const backend = indexerBackend({
@@ -105,6 +152,10 @@ describe('Indexers production integration', () => {
       expect(createTorrentFile).toHaveBeenCalledWith(torrentBytes, expect.any(AbortSignal));
       expect(createTorrent).not.toHaveBeenCalled();
       expect(requestDownloadLink).not.toHaveBeenCalled();
+
+      integration.invalidate(stored.id);
+      const invalidatedHead = await server.inject({ method: 'HEAD', url: path });
+      expect(invalidatedHead.statusCode).not.toBe(204);
     } finally {
       await server.close();
     }
@@ -251,7 +302,11 @@ function configuration(
       providers: {
         sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
         webshare: { enabled: false },
-        indexers: { enabled: true },
+        indexers: {
+          enabled: true,
+          backend: 'prowlarr',
+          selectedIndexerIds: ['public-fixture'],
+        },
       },
       torbox: { ...defaults.torbox, ...torboxOverrides },
     },
@@ -332,3 +387,16 @@ function playbackPath(value: string | undefined): string {
   const url = new URL(value);
   return `${url.pathname}${url.search}`;
 }
+
+const fixture = (name: string): Promise<string> =>
+  readFile(new URL(`../fixtures/indexers/${name}`, import.meta.url), 'utf8');
+
+const response = (body: string, contentType: string): Response =>
+  new Response(body, { status: 200, headers: { 'content-type': contentType } });
+
+const requestUrl = (value: string | URL | Request | undefined): URL => {
+  if (value instanceof URL) return value;
+  if (value instanceof Request) return new URL(value.url);
+  if (typeof value === 'string') return new URL(value);
+  throw new TypeError('Expected request URL');
+};

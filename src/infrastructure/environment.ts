@@ -24,6 +24,15 @@ const environmentSchema = z.object({
   ADDON_BASE_URL: addonBaseUrlSchema.default('http://127.0.0.1:7000'),
   CONFIG_DATABASE_PATH: z.string().min(1).default('addon.sqlite'),
   CONFIG_ENCRYPTION_KEY: z.string().min(1).optional(),
+  INDEXER_ALLOWED_ORIGINS: z
+    .string()
+    .default('')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+    ),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

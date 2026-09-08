@@ -384,7 +384,11 @@ describe('SearchStreams', () => {
       providers: {
         sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
         webshare: { enabled: false },
-        indexers: { enabled: true },
+        indexers: {
+          enabled: true,
+          backend: 'prowlarr',
+          selectedIndexerIds: ['public-fixture'],
+        },
       },
     };
     const withoutTorbox = createSearchStreams({

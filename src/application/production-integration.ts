@@ -20,6 +20,9 @@ import { isTorrentProviderResult } from '../domain/release.js';
 import { createTmdbMetadataSource } from '../metadata/tmdb-metadata-resolver.js';
 import { createSktorrentProvider } from '../providers/sktorrent/sktorrent-provider.js';
 import { createSktorrentSource } from '../providers/sktorrent/sktorrent-source.js';
+import { createIndexersProvider } from '../providers/indexers/indexers-provider.js';
+import { createJackettBackend } from '../providers/indexers/jackett-backend.js';
+import { createProwlarrBackend } from '../providers/indexers/prowlarr-backend.js';
 import { createTorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import type { TorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import { createWebshareApiClient } from '../providers/webshare/webshare-api-client.js';
@@ -28,6 +31,7 @@ import { createWebshareProvider } from '../providers/webshare/webshare-provider.
 import { createWebshareSource } from '../providers/webshare/webshare-source.js';
 import { createPlayTokenService } from '../security/play-token.js';
 import type { StreamProvider } from '../providers/provider.js';
+import type { IndexerEndpointPolicy } from '../security/indexer-endpoint-policy.js';
 
 export type ProductionIntegration = {
   searchStreamsForConfiguration(configuration: StoredConfiguration): SearchStreams;
@@ -43,6 +47,7 @@ export type ProductionIntegrationOptions = {
   maximumRuntimes?: number;
   clock?: () => number;
   observer?: SearchObserver;
+  indexerEndpointPolicy?: IndexerEndpointPolicy;
   factories?: {
     tmdbClient?: (accessToken: string, timeoutMs: number) => TmdbClient;
     sktorrentProvider?: (
@@ -169,6 +174,7 @@ export const createProductionIntegration = (
     playbackResolver,
     invalidate(configId) {
       runtimes.delete(configId);
+      references.deleteNamespace(configId);
       torrentFiles.deleteNamespace(configId);
     },
   };
@@ -224,6 +230,32 @@ const assembleSearch = (
       ...(observer === undefined ? {} : { observer }),
     });
     if (injected !== undefined) providers.push(injected);
+    else {
+      const credential = stored.credentials.indexers;
+      const configuration = stored.configuration.providers.indexers;
+      if (credential !== undefined && options.indexerEndpointPolicy !== undefined) {
+        options.indexerEndpointPolicy.assertAllowed(credential.endpoint);
+        const backend =
+          configuration.backend === 'prowlarr'
+            ? createProwlarrBackend({
+                baseUrl: credential.endpoint,
+                apiKey: credential.apiKey,
+                timeoutMs,
+              })
+            : createJackettBackend({
+                baseUrl: credential.endpoint,
+                apiKey: credential.apiKey,
+                timeoutMs,
+              });
+        providers.push(
+          createIndexersProvider(backend, {
+            selectedIndexerIds: configuration.selectedIndexerIds,
+            torrentFiles: { store: torrentFiles, namespace: stored.id },
+            ...(observer === undefined ? {} : { observer }),
+          }),
+        );
+      }
+    }
   }
   const torboxCredential = stored.credentials.torbox;
   const torboxClient =

@@ -309,7 +309,11 @@ describe('production integration', () => {
         providers: {
           sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
           webshare: { enabled: false },
-          indexers: { enabled: true },
+          indexers: {
+            enabled: true,
+            backend: 'prowlarr',
+            selectedIndexerIds: ['public-fixture'],
+          },
         },
       },
     };

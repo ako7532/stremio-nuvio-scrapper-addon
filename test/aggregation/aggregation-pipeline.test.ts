@@ -62,7 +62,10 @@ describe('aggregation pipeline stages', () => {
     );
     const providerConfiguration: UserConfiguration = {
       ...configuration,
-      providers: { ...configuration.providers, indexers: { enabled: true } },
+      providers: {
+        ...configuration.providers,
+        indexers: { enabled: true, backend: 'prowlarr', selectedIndexerIds: ['public-fixture'] },
+      },
       ranking: ['provider'],
     };
 

@@ -10,6 +10,7 @@ describe('environment', () => {
       LOG_LEVEL: 'info',
       TRUST_PROXY: false,
       SHUTDOWN_TIMEOUT_MS: 10_000,
+      INDEXER_ALLOWED_ORIGINS: [],
     });
   });
 
@@ -27,5 +28,13 @@ describe('environment', () => {
     expect(parseEnvironment({ ADDON_BASE_URL: 'https://addon.example/base/' }).ADDON_BASE_URL).toBe(
       'https://addon.example/base/',
     );
+  });
+
+  it('parses an explicit Indexers origin allowlist', () => {
+    expect(
+      parseEnvironment({
+        INDEXER_ALLOWED_ORIGINS: 'https://indexers.example, http://prowlarr:9696',
+      }).INDEXER_ALLOWED_ORIGINS,
+    ).toEqual(['https://indexers.example', 'http://prowlarr:9696']);
   });
 });

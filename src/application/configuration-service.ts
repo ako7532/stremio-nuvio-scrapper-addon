@@ -9,12 +9,33 @@ import type {
 } from '../domain/configuration.js';
 import { rankingFactors } from '../domain/configuration.js';
 import { dynamicRanges, resolutions, sourceTypes, videoCodecs } from '../domain/release.js';
+import type { IndexerEndpointPolicy } from '../security/indexer-endpoint-policy.js';
+import { ApplicationError } from './application-error.js';
 import type { ConfigurationStore, StoredConfiguration } from './configuration-store.js';
 
 const languagePreferencesSchema = z.strictObject({
   preferred: z.array(z.string().trim().min(2).max(16)).max(20),
   allowed: z.array(z.string().trim().min(2).max(16)).max(20),
   excluded: z.array(z.string().trim().min(2).max(16)).max(20),
+});
+const defaultIndexersConfiguration = {
+  enabled: false,
+  backend: 'prowlarr' as const,
+  selectedIndexerIds: [] as string[],
+};
+const indexersConfigurationSchema = z.strictObject({
+  enabled: z.boolean(),
+  backend: z.enum(['prowlarr', 'jackett']),
+  selectedIndexerIds: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(100)
+        .regex(/^[A-Za-z\d._-]+$/u),
+    )
+    .max(20),
 });
 const configurationSchema = z
   .strictObject({
@@ -25,6 +46,7 @@ const configurationSchema = z
         playbackMode: z.enum(['direct-torrent', 'torbox-only']),
       }),
       webshare: z.strictObject({ enabled: z.boolean() }),
+      indexers: indexersConfigurationSchema.default(defaultIndexersConfiguration),
     }),
     filters: z.strictObject({
       resolutions: z.array(z.enum(resolutions)).max(resolutions.length),
@@ -78,6 +100,16 @@ const configurationSchema = z
       });
     }
     if (
+      new Set(configuration.providers.indexers.selectedIndexerIds).size !==
+      configuration.providers.indexers.selectedIndexerIds.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Selected indexer IDs must be unique',
+        path: ['providers', 'indexers', 'selectedIndexerIds'],
+      });
+    }
+    if (
       configuration.filters.minimumSizeBytes !== undefined &&
       configuration.filters.maximumSizeBytes !== undefined &&
       configuration.filters.minimumSizeBytes > configuration.filters.maximumSizeBytes
@@ -99,11 +131,25 @@ const torboxCredentialSchema = z.strictObject({ apiKey: z.string().trim().min(1)
 const tmdbCredentialSchema = z.strictObject({
   accessToken: z.string().trim().min(1).max(2_048),
 });
+const indexersCredentialSchema = z.strictObject({
+  endpoint: z
+    .url()
+    .max(2_048)
+    .refine((value) => ['http:', 'https:'].includes(new URL(value).protocol), {
+      message: 'Indexer endpoint must use HTTP or HTTPS',
+    })
+    .refine((value) => {
+      const endpoint = new URL(value);
+      return endpoint.username === '' && endpoint.password === '' && endpoint.hash === '';
+    }, 'Indexer endpoint must not contain credentials or a fragment'),
+  apiKey: z.string().trim().min(1).max(1_024),
+});
 const credentialChangesSchema = z.strictObject({
   tmdb: tmdbCredentialSchema.nullable().optional(),
   sktorrent: sktorrentCredentialSchema.nullable().optional(),
   webshare: webshareCredentialSchema.nullable().optional(),
   torbox: torboxCredentialSchema.nullable().optional(),
+  indexers: indexersCredentialSchema.nullable().optional(),
 });
 const saveSchema = z.strictObject({
   configuration: configurationSchema,
@@ -127,15 +173,24 @@ export type ConfigurationService = {
   getStored(id: string): Promise<StoredConfiguration | undefined>;
 };
 
-export function createConfigurationService(store: ConfigurationStore): ConfigurationService {
+export function createConfigurationService(
+  store: ConfigurationStore,
+  options: { indexerEndpointPolicy?: IndexerEndpointPolicy } = {},
+): ConfigurationService {
   return {
     async create(input, baseUrl) {
       const parsed = saveSchema.parse(input);
+      const credentials = applyCredentialChanges({}, parsed.credentials);
+      validateIndexerConfiguration(
+        parsed.configuration as UserConfiguration,
+        credentials,
+        options.indexerEndpointPolicy,
+      );
       const now = new Date().toISOString();
       const stored: StoredConfiguration = {
         id: randomBytes(24).toString('base64url'),
         configuration: parsed.configuration as UserConfiguration,
-        credentials: applyCredentialChanges({}, parsed.credentials),
+        credentials,
         createdAt: now,
         updatedAt: now,
       };
@@ -143,13 +198,20 @@ export function createConfigurationService(store: ConfigurationStore): Configura
       return toPublic(stored, baseUrl);
     },
     async update(id, input, baseUrl) {
-      const previous = await store.get(id);
-      if (previous === undefined) return undefined;
+      const storedPrevious = await store.get(id);
+      if (storedPrevious === undefined) return undefined;
+      const previous = normalizeStoredConfiguration(storedPrevious);
       const parsed = saveSchema.parse(input);
+      const credentials = applyCredentialChanges(previous.credentials, parsed.credentials);
+      validateIndexerConfiguration(
+        parsed.configuration as UserConfiguration,
+        credentials,
+        options.indexerEndpointPolicy,
+      );
       const stored: StoredConfiguration = {
         ...previous,
         configuration: parsed.configuration as UserConfiguration,
-        credentials: applyCredentialChanges(previous.credentials, parsed.credentials),
+        credentials,
         updatedAt: new Date().toISOString(),
       };
       await store.save(stored);
@@ -158,15 +220,46 @@ export function createConfigurationService(store: ConfigurationStore): Configura
     get(id, baseUrl) {
       return store
         .get(id)
-        .then((stored) => (stored === undefined ? undefined : toPublic(stored, baseUrl)));
+        .then((stored) =>
+          stored === undefined
+            ? undefined
+            : toPublic(normalizeStoredConfiguration(stored), baseUrl),
+        );
     },
     revoke(id) {
       return store.delete(id);
     },
-    getStored(id) {
-      return store.get(id);
+    async getStored(id) {
+      const stored = await store.get(id);
+      return stored === undefined ? undefined : normalizeStoredConfiguration(stored);
     },
   };
+}
+
+function validateIndexerConfiguration(
+  configuration: UserConfiguration,
+  credentials: ProviderCredentials,
+  endpointPolicy: IndexerEndpointPolicy | undefined,
+): void {
+  const indexersCredential = credentials.indexers;
+  if (indexersCredential !== undefined) {
+    try {
+      endpointPolicy?.assertAllowed(indexersCredential.endpoint);
+      if (endpointPolicy === undefined) {
+        throw new TypeError('Indexers endpoint policy is not configured');
+      }
+    } catch (error) {
+      throw new ApplicationError('InvalidConfiguration', { cause: error });
+    }
+  }
+  if (configuration.providers.indexers?.enabled !== true) return;
+  if (
+    configuration.providers.indexers.selectedIndexerIds.length === 0 ||
+    indexersCredential === undefined ||
+    credentials.torbox === undefined
+  ) {
+    throw new ApplicationError('InvalidConfiguration');
+  }
 }
 
 function applyCredentialChanges(
@@ -182,7 +275,16 @@ function applyCredentialChanges(
   else if (changes.webshare !== undefined) next.webshare = changes.webshare;
   if (changes.torbox === null) delete next.torbox;
   else if (changes.torbox !== undefined) next.torbox = changes.torbox;
+  if (changes.indexers === null) delete next.indexers;
+  else if (changes.indexers !== undefined) next.indexers = changes.indexers;
   return next;
+}
+
+function normalizeStoredConfiguration(stored: StoredConfiguration): StoredConfiguration {
+  return {
+    ...stored,
+    configuration: configurationSchema.parse(stored.configuration) as UserConfiguration,
+  };
 }
 
 function toPublic(stored: StoredConfiguration, baseUrl: string): PublicConfiguration {
@@ -205,6 +307,8 @@ function toPublic(stored: StoredConfiguration, baseUrl: string): PublicConfigura
       sktorrent: status('sktorrent'),
       webshare: status('webshare'),
       torbox: status('torbox'),
+      indexers:
+        stored.credentials.indexers === undefined ? { configured: false } : { configured: true },
     },
     manifestUrl: new URL(
       `${encodeURIComponent(stored.id)}/manifest.json`,
