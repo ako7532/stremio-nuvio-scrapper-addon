@@ -16,6 +16,7 @@ import { createWebsharePlaybackAssembly } from './webshare-playback.js';
 import { OrderedMetadataResolver } from '../metadata/metadata-resolver.js';
 import { createTmdbClient } from '../metadata/tmdb-client.js';
 import type { TmdbClient } from '../metadata/tmdb-client.js';
+import { isTorrentProviderResult } from '../domain/release.js';
 import { createTmdbMetadataSource } from '../metadata/tmdb-metadata-resolver.js';
 import { createSktorrentProvider } from '../providers/sktorrent/sktorrent-provider.js';
 import { createSktorrentSource } from '../providers/sktorrent/sktorrent-source.js';
@@ -98,7 +99,7 @@ export const createProductionIntegration = (
         },
       );
       return candidates.flatMap(({ result, matchScore }) =>
-        result.provider === 'sktorrent' ? [{ result, matchScore }] : [],
+        isTorrentProviderResult(result) ? [{ result, matchScore }] : [],
       );
     },
     ...(options.observer === undefined ? {} : { observer: options.observer }),
@@ -118,13 +119,17 @@ export const createProductionIntegration = (
     async inspect(token) {
       if (references.get(token) !== undefined) return torboxResolver.inspect(token);
       const claims = tokens.verify(token);
-      if (claims.provider === 'sktorrent') return torboxResolver.inspect(token);
+      if (claims.provider === 'sktorrent' || claims.provider === 'indexers') {
+        return torboxResolver.inspect(token);
+      }
       return webshare.resolver.inspect(token);
     },
     async resolve(token, signal) {
       if (references.get(token) !== undefined) return torboxResolver.resolve(token, signal);
       const claims = tokens.verify(token);
-      if (claims.provider === 'sktorrent') return torboxResolver.resolve(token, signal);
+      if (claims.provider === 'sktorrent' || claims.provider === 'indexers') {
+        return torboxResolver.resolve(token, signal);
+      }
       return webshare.resolver.resolve(token, signal);
     },
   };

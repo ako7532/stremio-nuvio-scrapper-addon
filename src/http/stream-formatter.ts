@@ -6,6 +6,7 @@ import type {
   RankedResult,
   TorrentProviderResult,
 } from '../domain/release.js';
+import { isTorrentProviderResult } from '../domain/release.js';
 
 export type StremioStream = {
   type?: MediaRequest['type'];
@@ -61,8 +62,8 @@ function playbackFields(
   media: MediaRequest | undefined,
   rankedResults: readonly RankedResult[],
 ): Pick<StremioStream, 'type' | 'url' | 'infoHash' | 'behaviorHints'> | undefined {
-  if (result.provider === 'sktorrent') {
-    if (configuration.providers.sktorrent.playbackMode === 'direct-torrent') {
+  if (isTorrentProviderResult(result)) {
+    if (torrentPlaybackMode(result, configuration) === 'direct-torrent') {
       if (result.mediaType === 'series' && result.filename === undefined) return undefined;
       return {
         infoHash: result.infoHash,
@@ -115,14 +116,14 @@ function displayFields(
       ? undefined
       : `${[...new Set(subtitleLanguages.map((language) => language.toUpperCase()))].join('/')} subs`,
     result.seeders === undefined ? undefined : `S:${result.seeders.toString()}`,
-    result.provider === 'sktorrent' && result.cacheStatus === 'cached' ? 'cached' : undefined,
-    result.provider === 'sktorrent' &&
-    configuration.providers.sktorrent.playbackMode === 'torbox-only' &&
+    isTorrentProviderResult(result) && result.cacheStatus === 'cached' ? 'cached' : undefined,
+    isTorrentProviderResult(result) &&
+    torrentPlaybackMode(result, configuration) === 'torbox-only' &&
     result.cacheStatus === 'uncached'
       ? '⏳ TorBox download required — open once, then retry'
       : undefined,
   ].filter((value): value is string => value !== undefined && value.length > 0);
-  const provider = result.provider === 'sktorrent' ? 'SKTorrent' : 'Webshare';
+  const provider = providerLabel[result.provider];
   const resolution = parsed?.resolution === 'unknown' ? undefined : parsed?.resolution;
   const summary = [firstLine, ...details].filter(Boolean).join(' • ');
 
@@ -134,6 +135,18 @@ function displayFields(
         : [result.releaseName, firstLine, details.join(' • ')].filter(Boolean).join('\n'),
   };
 }
+
+const providerLabel: Readonly<Record<ProviderResult['provider'], string>> = {
+  sktorrent: 'SKTorrent',
+  webshare: 'Webshare',
+  indexers: 'Indexers',
+};
+
+const torrentPlaybackMode = (
+  result: TorrentProviderResult,
+  configuration: UserConfiguration,
+): 'direct-torrent' | 'torbox-only' =>
+  result.provider === 'sktorrent' ? configuration.providers.sktorrent.playbackMode : 'torbox-only';
 
 function formatSize(sizeBytes: number | undefined): string | undefined {
   if (sizeBytes === undefined) return undefined;

@@ -58,7 +58,7 @@ export type TorboxPlaybackResolver = {
   resolve(token: string, signal?: AbortSignal): Promise<PlaybackResolution>;
 };
 
-type TorboxPlayTokenClaims = Extract<PlayTokenClaims, { provider: 'sktorrent' }>;
+type TorboxPlayTokenClaims = Extract<PlayTokenClaims, { provider: 'sktorrent' | 'indexers' }>;
 
 export type TorboxPlaybackResolverOptions = {
   tokens: PlayTokenService;
@@ -128,7 +128,7 @@ export const createTorboxPlaybackResolver = (
     let reference = options.references.get(token);
     if (reference === undefined) {
       const claims = options.tokens.verify(token);
-      if (claims.provider !== 'sktorrent') {
+      if (claims.provider !== 'sktorrent' && claims.provider !== 'indexers') {
         throw new PlaybackResolveError('invalid-reference', 'Playback reference is invalid');
       }
       reference = options.references.get(claims.referenceId);

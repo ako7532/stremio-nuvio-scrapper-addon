@@ -46,4 +46,18 @@ describe('play token service', () => {
       expect.objectContaining({ kind: 'expired' }) as Error,
     );
   });
+
+  it('accepts Indexers as an encrypted torrent playback provider', () => {
+    const service = createPlayTokenService({
+      secret: 'fixture-secret-with-at-least-32-bytes',
+      clock: () => 10_000,
+    });
+
+    const token = service.issue({ ...claims, provider: 'indexers' });
+
+    expect(service.verify(token)).toMatchObject({
+      provider: 'indexers',
+      infoHash: claims.infoHash,
+    });
+  });
 });

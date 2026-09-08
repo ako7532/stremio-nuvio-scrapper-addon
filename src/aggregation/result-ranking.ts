@@ -3,7 +3,13 @@ import type {
   RankingFactor,
   UserConfiguration,
 } from '../domain/configuration.js';
-import type { AudioCodec, ProviderResult, RankedResult } from '../domain/release.js';
+import {
+  isTorrentProviderResult,
+  type AudioCodec,
+  type ProviderName,
+  type ProviderResult,
+  type RankedResult,
+} from '../domain/release.js';
 
 const resolutionValue = {
   unknown: 0,
@@ -65,7 +71,7 @@ function buildRankValues(
 ): Readonly<Record<RankingFactor, number>> {
   const parsed = result.parsed;
   return {
-    cached: result.provider === 'sktorrent' ? cacheValue(result.cacheStatus) : 1,
+    cached: isTorrentProviderResult(result) ? cacheValue(result.cacheStatus) : 1,
     language:
       parsed === undefined
         ? 0
@@ -83,9 +89,15 @@ function buildRankValues(
         : Math.max(0, ...parsed.audioCodecs.map((codec) => audioCodecValue[codec])),
     seeders: result.seeders ?? -1,
     size: result.sizeBytes ?? -1,
-    provider: result.provider === 'sktorrent' ? 1 : 0,
+    provider: providerValue[result.provider],
   };
 }
+
+const providerValue: Readonly<Record<ProviderName, number>> = {
+  sktorrent: 2,
+  webshare: 1,
+  indexers: 0,
+};
 
 function compareRankedResults(
   left: RankedResult,

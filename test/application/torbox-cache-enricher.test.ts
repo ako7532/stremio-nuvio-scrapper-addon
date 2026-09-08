@@ -55,6 +55,21 @@ describe('TorBox cache enricher', () => {
     expect(value?.result).toMatchObject({ cacheStatus: 'unknown' });
   });
 
+  it('enriches every torrent source, including Indexers', async () => {
+    const checkCached = vi
+      .fn<TorboxApiClient['checkCached']>()
+      .mockResolvedValue([{ hash: 'a'.repeat(40), status: 'cached' }]);
+    const enricher = createTorboxCacheEnricher(client({ checkCached }));
+
+    const [value] = await enricher([ranked('a', 'indexers')], {
+      signal: new AbortController().signal,
+      correlationId: 'request-indexers',
+    });
+
+    expect(value?.result).toMatchObject({ provider: 'indexers', cacheStatus: 'cached' });
+    expect(checkCached).toHaveBeenCalledWith(['a'.repeat(40)], expect.any(AbortSignal));
+  });
+
   it('bounds retained cache entries', async () => {
     const checkCached = vi
       .fn<TorboxApiClient['checkCached']>()
@@ -95,15 +110,18 @@ describe('TorBox cache enricher', () => {
   });
 });
 
-const ranked = (prefix: string): RankedResult => ({
+const ranked = (
+  prefix: string,
+  provider: TorrentProviderResult['provider'] = 'sktorrent',
+): RankedResult => ({
   result: {
-    provider: 'sktorrent',
+    provider,
     source: 'torrent',
     id: prefix,
     title: 'Fixture',
     releaseName: 'Fixture.1080p.mkv',
     mediaType: 'movie',
-    providerUrl: 'https://sktorrent.eu/torrent/details.php?id=fixture',
+    providerUrl: 'https://indexer-backend.example/release',
     infoHash: prefix.repeat(40),
     magnetUri: `magnet:?xt=urn:btih:${prefix.repeat(40)}`,
     cacheStatus: 'unknown',

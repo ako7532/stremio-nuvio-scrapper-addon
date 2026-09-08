@@ -1,6 +1,7 @@
 import type { TorboxApiClient } from '../providers/torbox/torbox-api-client.js';
 import { TorboxTransportError } from '../providers/torbox/torbox-api-client.js';
 import { observeCache, type CacheObserver } from '../infrastructure/cache-observer.js';
+import { isTorrentProviderResult } from '../domain/release.js';
 import type { CacheEnricher } from './search-streams.js';
 
 export type TorboxCacheEnricherOptions = {
@@ -36,7 +37,7 @@ export const createTorboxCacheEnricher = (
     const hashes = [
       ...new Set(
         results.flatMap(({ result }) =>
-          result.provider === 'sktorrent' ? [result.infoHash.toLowerCase()] : [],
+          isTorrentProviderResult(result) ? [result.infoHash.toLowerCase()] : [],
         ),
       ),
     ];
@@ -83,7 +84,7 @@ export const createTorboxCacheEnricher = (
     }
 
     return results.map((ranked) => {
-      if (ranked.result.provider !== 'sktorrent') return ranked;
+      if (!isTorrentProviderResult(ranked.result)) return ranked;
       return {
         ...ranked,
         result: {

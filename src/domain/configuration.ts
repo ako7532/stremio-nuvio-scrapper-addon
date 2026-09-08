@@ -37,6 +37,7 @@ export type UserConfiguration = {
       playbackMode: 'direct-torrent' | 'torbox-only';
     };
     webshare: { enabled: boolean };
+    indexers?: { enabled: boolean };
   };
   filters: {
     resolutions: readonly Resolution[];

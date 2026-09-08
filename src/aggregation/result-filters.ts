@@ -1,5 +1,9 @@
 import type { LanguagePreferences, UserConfiguration } from '../domain/configuration.js';
-import type { ProviderResult, RankedResult } from '../domain/release.js';
+import {
+  isTorrentProviderResult,
+  type ProviderResult,
+  type RankedResult,
+} from '../domain/release.js';
 
 export function filterResults(
   candidates: readonly RankedResult[],
@@ -30,7 +34,7 @@ export function getFilterRejectionReason(
   result: ProviderResult,
   configuration: UserConfiguration,
 ): FilterRejectionReason | undefined {
-  if (!configuration.providers[result.provider].enabled) return 'provider disabled';
+  if (configuration.providers[result.provider]?.enabled !== true) return 'provider disabled';
   if (result.provider === 'webshare' && (!result.available || !result.streamable)) {
     return 'webshare unavailable';
   }
@@ -56,7 +60,7 @@ export function getFilterRejectionReason(
     return 'above maximum size';
   }
   if (
-    result.provider === 'sktorrent' &&
+    isTorrentProviderResult(result) &&
     (result.seeders ?? 0) < configuration.filters.minimumSeeders
   ) {
     return 'below minimum seeders';

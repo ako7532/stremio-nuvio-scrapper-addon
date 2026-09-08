@@ -64,6 +64,31 @@ describe('Stremio stream formatter', () => {
     expect(streams[0]).not.toHaveProperty('infoHash');
   });
 
+  it('keeps Indexers TorBox-only even when SKTorrent direct playback is enabled', () => {
+    const indexerResult: TorrentProviderResult = {
+      ...result,
+      provider: 'indexers',
+      id: 'indexer-result',
+      providerUrl: 'https://indexer-backend.example/release',
+    };
+    const streams = formatStreams(
+      [{ ...ranked, result: indexerResult }],
+      configuration('direct-torrent'),
+      undefined,
+      () => 'https://addon.example/play/opaque-token',
+      { type: 'movie', id: 'tt0807840' },
+    );
+
+    expect(streams).toEqual([
+      expect.objectContaining({
+        name: 'Indexers 1080p',
+        type: 'movie',
+        url: 'https://addon.example/play/opaque-token',
+      }),
+    ]);
+    expect(streams[0]).not.toHaveProperty('infoHash');
+  });
+
   it('clearly marks an uncached TorBox stream as requiring a first download attempt', () => {
     const streams = formatStreams(
       [{ ...ranked, result: { ...result, cacheStatus: 'uncached' } }],
