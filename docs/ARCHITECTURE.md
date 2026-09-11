@@ -29,7 +29,7 @@ The `SearchStreams` use case runs enabled providers in parallel and processes ea
 variants sequentially. Every query and provider settles independently, so one failure does not discard
 successful results. Cancellation is the exception and propagates to the caller. Matching happens before
 provider-specific deduplication; hard filters run before an optional cache enricher; production stream
-search defers TorBox enrichment until playback, while post-playback precache still uses it; ranking is a
+search performs batched read-only TorBox enrichment before ranking; ranking is a
 lexicographic comparison of the configured factors with explicit identity tie-breakers. Per-resolution
 limits are applied before the total limit.
 The total limit also has a server-side cap of 100 results.
@@ -40,9 +40,9 @@ TMDB resolver, enabled provider adapters, caches, budgets, and playback URL fact
 revocation discard the searchable runtime while playback still reloads current credentials server-side.
 
 Stream formatting is the last pipeline stage. Direct SKTorrent mode emits a verified `infoHash`;
-TorBox-only results require an addon-owned play-URL factory. Production search does not contact TorBox
-or hide a result based on cache state; the selected result is checked or added only after playback GET,
-according to the user's uncached-torrent setting.
+TorBox-only results require an addon-owned play-URL factory. Production search performs a read-only
+cache lookup, labels cached results, and hides uncached results unless the user allows them. Adding a
+torrent and resolving its download link happen only after playback GET.
 Multi-file series torrents are accepted only through TorBox, where playback selects the requested
 episode from the provider-confirmed file list. Webshare results enter ranking and limits only when an addon-owned play-URL
 factory is available. Formatting accepts only an HTTPS URL from that factory and never asks Webshare

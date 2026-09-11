@@ -34,8 +34,9 @@ describe('configuration HTTP API', () => {
     expect(response.body).toContain('.test-status.error{color:var(--danger)}');
     expect(response.body).toContain("status.classList.toggle('error'");
     expect(response.body).toContain('id="streamPreview"');
+    expect(response.body).toContain('⚡ TorBox • CACHED');
     expect(response.body).toContain('1 is the highest priority');
-    expect(response.body).toContain('TorBox is contacted only after you open an SKTorrent source');
+    expect(response.body).toContain('The source list checks TorBox cache without adding torrents');
     expect(response.body).toContain('name="resultLimitPerQuality"');
     expect(response.body).toContain('perResolution=perQualityValue');
     expect(response.body).toContain('name="safeDebug" type="checkbox"');

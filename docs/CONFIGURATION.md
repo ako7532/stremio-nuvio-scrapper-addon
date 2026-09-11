@@ -32,10 +32,11 @@ overall result limit. Compact mode shortens labels; detailed mode includes the n
 
 ## TorBox and precache
 
-The source-list request does not contact TorBox, so SKTorrent results are shown without a live cache
-label. After a real playback GET, an existing account torrent is reused. If adding uncached torrents is
-disabled, the selected hash is checked and a non-cached torrent is rejected without adding it. If it is
-enabled, the selected torrent may be added after the click.
+The source-list request performs a batched, read-only TorBox cache lookup. Cached results show
+`⚡ TorBox • CACHED`; uncached results are hidden unless adding uncached torrents is enabled. A failed or
+ambiguous lookup remains unknown rather than being labelled cached. After a real playback GET, an
+existing account torrent is reused. Only that playback GET may add a selected torrent or request its
+download link.
 Precache count defaults to zero and is capped at ten. For series it searches the following episodes in
 the same season and selects at most one suitable torrent for each episode. Precache starts only after a
 real GET successfully resolves the selected playback; search and HEAD remain mutation-free. Score,

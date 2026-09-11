@@ -171,7 +171,7 @@ describe('production integration', () => {
     ).rejects.toMatchObject({ kind: 'InvalidConfiguration' });
   });
 
-  it('does not contact TorBox while production stream results are loading', async () => {
+  it('checks TorBox cache while loading production streams without touching the account', async () => {
     const base = configuration();
     const stored: StoredConfiguration = {
       ...base,
@@ -187,15 +187,19 @@ describe('production integration', () => {
         torbox: { apiKey: 'server-held-fixture-key' },
       },
     };
-    const checkCached = vi.fn<TorboxApiClient['checkCached']>();
+    const checkCached = vi
+      .fn<TorboxApiClient['checkCached']>()
+      .mockResolvedValue([{ hash: 'a'.repeat(40), status: 'cached' }]);
     const listTorrents = vi.fn<TorboxApiClient['listTorrents']>();
+    const createTorrent = vi.fn<TorboxApiClient['createTorrent']>();
+    const requestDownloadLink = vi.fn<TorboxApiClient['requestDownloadLink']>();
     const torbox: TorboxApiClient = {
       validateAuthentication: vi.fn(),
       checkCached,
       listTorrents,
       getTorrent: vi.fn(),
-      createTorrent: vi.fn(),
-      requestDownloadLink: vi.fn(),
+      createTorrent,
+      requestDownloadLink,
     };
     const filename = 'Sintel.2010.1080p.WEB-DL.CZ.HEVC.mkv';
     const integration = createProductionIntegration({
@@ -242,13 +246,16 @@ describe('production integration', () => {
       .searchStreamsForConfiguration(stored)
       .search(
         { type: 'movie', id: 'tt0000011' },
-        { signal: new AbortController().signal, correlationId: 'deferred-torbox-production' },
+        { signal: new AbortController().signal, correlationId: 'torbox-cache-production' },
       );
 
     expect(streams).toHaveLength(1);
     expect(streams[0]).toHaveProperty('url');
-    expect(checkCached).not.toHaveBeenCalled();
+    expect(streams[0]?.title).toContain('⚡ TorBox • CACHED');
+    expect(checkCached).toHaveBeenCalledWith(['a'.repeat(40)], expect.any(AbortSignal));
     expect(listTorrents).not.toHaveBeenCalled();
+    expect(createTorrent).not.toHaveBeenCalled();
+    expect(requestDownloadLink).not.toHaveBeenCalled();
   });
 
   it('assembles SKTorrent and Webshare only when independently enabled', () => {

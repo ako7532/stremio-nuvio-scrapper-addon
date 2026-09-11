@@ -83,7 +83,17 @@ export type TorboxPlaybackUrlFactoryOptions = {
   references: PlaybackReferenceStore;
 };
 
-const DEFAULT_ALLOWED_PLAYBACK_HOSTS = ['torbox.app', 'torboxcdn.com', 'tb-cdn.io'] as const;
+const DEFAULT_ALLOWED_PLAYBACK_HOSTS = [
+  'torbox.app',
+  'torboxcdn.com',
+  'tb-cdn.cx',
+  'tb-cdn.io',
+  'tb-cdn.pw',
+  'tb-cdn.sh',
+  'tb-cdn.st',
+  'tb-cdn.to',
+  'tb-cdn.earth',
+] as const;
 const DEFAULT_RESOLUTION_TTL_MS = 2 * 60 * 1_000;
 
 export const createTorboxPlaybackUrlFactory = (
@@ -213,6 +223,7 @@ const resolvePlayback = async (
   const accountTorrents = await runStage('list-torrents', () => client.listTorrents(signal));
   let torrent = accountTorrents.find((candidate) => candidate.hash.toLowerCase() === hash);
   if (torrent === undefined) {
+    let cachedOnTorbox = false;
     if (!playback.reference.allowUncached) {
       const cacheEntries = await runStage('check-cache', () => client.checkCached([hash], signal));
       const cacheStatus = cacheEntries.find((entry) => entry.hash.toLowerCase() === hash)?.status;
@@ -222,6 +233,7 @@ const resolvePlayback = async (
           'The selected torrent is not cached on TorBox',
         );
       }
+      cachedOnTorbox = true;
     }
     const magnetUri = playback.reference.result.magnetUri;
     if (magnetUri === undefined) {
@@ -236,13 +248,18 @@ const resolvePlayback = async (
     if (created.hash !== undefined && created.hash.toLowerCase() !== hash) {
       throw new PlaybackResolveError('invalid-reference', 'Created torrent hash does not match');
     }
+    if (cachedOnTorbox) {
+      torrent = await runStage('refresh-torrent', () => client.getTorrent(created.id, signal));
+    }
     // TorBox may expose a newly-created magnet before its metadata and files are available.
     // Do not turn that expected transition into a 502; the next playback GET reads fresh state.
-    return {
-      url: pendingPlaybackUrl,
-      filename: 'torbox-downloading.mp4',
-      pending: true,
-    };
+    if (torrent === undefined || !isTorrentReady(torrent)) {
+      return {
+        url: pendingPlaybackUrl,
+        filename: 'torbox-downloading.mp4',
+        pending: true,
+      };
+    }
   } else if (!isTorrentReady(torrent)) {
     const torrentId = torrent.id;
     torrent = await runStage('refresh-torrent', () => client.getTorrent(torrentId, signal));

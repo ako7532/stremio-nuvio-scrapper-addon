@@ -94,10 +94,16 @@ describe('TorBox playback', () => {
     const createTorrent = vi
       .fn<TorboxApiClient['createTorrent']>()
       .mockResolvedValue({ id: 42, hash });
+    const getTorrent = vi.fn<TorboxApiClient['getTorrent']>().mockResolvedValue({
+      ...torrent,
+      downloadState: 'downloading',
+      downloadFinished: false,
+      downloadPresent: false,
+    });
     const requestDownloadLink = vi
       .fn<TorboxApiClient['requestDownloadLink']>()
       .mockResolvedValue('https://cdn.torbox.app/fixture-video');
-    const api = client({ listTorrents, createTorrent, requestDownloadLink });
+    const api = client({ listTorrents, createTorrent, getTorrent, requestDownloadLink });
     const setup = playbackSetup(api);
 
     const [first, second] = await Promise.all([
@@ -112,7 +118,39 @@ describe('TorBox playback', () => {
     });
     expect(second).toEqual(first);
     expect(createTorrent).toHaveBeenCalledOnce();
+    expect(getTorrent).toHaveBeenCalledOnce();
     expect(requestDownloadLink).not.toHaveBeenCalled();
+  });
+
+  it('plays a cached torrent immediately after attaching it to the account', async () => {
+    const checkCached = vi
+      .fn<TorboxApiClient['checkCached']>()
+      .mockResolvedValue([{ hash, status: 'cached' }]);
+    const createTorrent = vi
+      .fn<TorboxApiClient['createTorrent']>()
+      .mockResolvedValue({ id: 42, hash });
+    const getTorrent = vi.fn<TorboxApiClient['getTorrent']>().mockResolvedValue(torrent);
+    const requestDownloadLink = vi
+      .fn<TorboxApiClient['requestDownloadLink']>()
+      .mockResolvedValue('https://cdn.torbox.app/fixture-video');
+    const setup = playbackSetup(
+      client({
+        checkCached,
+        listTorrents: vi.fn().mockResolvedValue([]),
+        createTorrent,
+        getTorrent,
+        requestDownloadLink,
+      }),
+    );
+
+    await expect(setup.resolver.resolve(setup.token)).resolves.toEqual({
+      url: 'https://cdn.torbox.app/fixture-video',
+      filename: 'Fixture.Show.S01E02.mkv',
+    });
+    expect(checkCached).toHaveBeenCalledWith([hash], undefined);
+    expect(createTorrent).toHaveBeenCalledOnce();
+    expect(getTorrent).toHaveBeenCalledWith(42, undefined);
+    expect(requestDownloadLink).toHaveBeenCalledWith(42, 1, undefined);
   });
 
   it('checks TorBox only after playback and does not add a disabled uncached torrent', async () => {
@@ -164,6 +202,12 @@ describe('TorBox playback', () => {
     const createTorrentFile = vi
       .fn<NonNullable<TorboxApiClient['createTorrentFile']>>()
       .mockResolvedValue({ id: 42, hash });
+    const getTorrent = vi.fn<TorboxApiClient['getTorrent']>().mockResolvedValue({
+      ...torrent,
+      downloadState: 'downloading',
+      downloadFinished: false,
+      downloadPresent: false,
+    });
     const getTorrentFile = vi.fn().mockReturnValue(Uint8Array.from([100, 101]));
     const torrentFiles: TorrentFileStore = {
       put: vi.fn(),
@@ -173,6 +217,7 @@ describe('TorBox playback', () => {
     const setup = playbackSetup(
       client({
         listTorrents: vi.fn().mockResolvedValue([]),
+        getTorrent,
         createTorrent,
         createTorrentFile,
       }),
@@ -227,6 +272,9 @@ describe('TorBox playback', () => {
       .mockResolvedValue('https://cdn.torbox.app/fixture-video');
     const setup = playbackSetup(
       client({ listTorrents, createTorrent, getTorrent, requestDownloadLink }),
+      undefined,
+      undefined,
+      { ...configuration, torbox: { showUncached: true, precacheCount: 0 } },
     );
 
     await expect(setup.resolver.resolve(setup.token)).resolves.toEqual({
@@ -241,18 +289,34 @@ describe('TorBox playback', () => {
     expect(requestDownloadLink).toHaveBeenCalledOnce();
   });
 
-  it('accepts the current TorBox CDN host', async () => {
+  it.each(['cx', 'io', 'pw', 'sh', 'st', 'to', 'earth'])(
+    'accepts an official TorBox tb-cdn.%s host',
+    async (topLevelDomain) => {
+      const playbackUrl = `https://store-040.wnam.tb-cdn.${topLevelDomain}/fixture-video`;
+      const api = client({
+        listTorrents: vi.fn().mockResolvedValue([torrent]),
+        requestDownloadLink: vi.fn().mockResolvedValue(playbackUrl),
+      });
+      const setup = playbackSetup(api);
+
+      await expect(setup.resolver.resolve(setup.token)).resolves.toMatchObject({
+        url: playbackUrl,
+      });
+    },
+  );
+
+  it('rejects a lookalike outside the TorBox CDN allowlist', async () => {
     const api = client({
       listTorrents: vi.fn().mockResolvedValue([torrent]),
       requestDownloadLink: vi
         .fn()
-        .mockResolvedValue('https://store-040.wnam.tb-cdn.io/fixture-video'),
+        .mockResolvedValue('https://store-040.wnam.tb-cdn.io.example.com/fixture-video'),
     });
     const setup = playbackSetup(api);
 
-    await expect(setup.resolver.resolve(setup.token)).resolves.toMatchObject({
-      url: 'https://store-040.wnam.tb-cdn.io/fixture-video',
-    });
+    await expect(setup.resolver.resolve(setup.token)).rejects.toEqual(
+      expect.objectContaining<Partial<PlaybackResolveError>>({ kind: 'invalid-provider-url' }),
+    );
   });
 
   it('rejects provider links outside the allowlist', async () => {
