@@ -56,35 +56,4 @@ describe('search caches', () => {
 
     expect(search).toHaveBeenCalledTimes(2);
   });
-
-  it('preserves and caches metadata-aware provider searches', async () => {
-    const searchMetadata = vi.fn().mockResolvedValue([]);
-    const provider: StreamProvider = {
-      name: 'indexers',
-      capabilities: {
-        search: true,
-        source: 'torrent',
-        requiresAuthentication: true,
-        supportsDirectStreaming: false,
-        supportsCacheLookup: false,
-      },
-      search: vi.fn().mockResolvedValue([]),
-      searchMetadata,
-    };
-    const cached = createCachedStreamProvider(provider);
-    const metadata = {
-      type: 'movie' as const,
-      id: 'tt0000011',
-      originalTitle: 'Sintel',
-      alternativeTitles: [],
-      year: 2010,
-    };
-    const context = { signal: new AbortController().signal, correlationId: 'request-indexers' };
-
-    await cached.searchMetadata?.(metadata, context);
-    await cached.searchMetadata?.(metadata, context);
-    await cached.searchMetadata?.({ ...metadata, year: 2011 }, context);
-
-    expect(searchMetadata).toHaveBeenCalledTimes(2);
-  });
 });

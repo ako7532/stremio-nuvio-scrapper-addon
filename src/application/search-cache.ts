@@ -47,7 +47,6 @@ export function createCachedStreamProvider(
   provider: StreamProvider,
   options: SearchCacheOptions = {},
 ): StreamProvider {
-  const metadataSearch = provider.searchMetadata?.bind(provider);
   const cache = createBoundedTtlCache<string, readonly ProviderResult[]>({
     ttlMs: options.ttlMs ?? PROVIDER_SEARCH_TTL_MS,
     maximumEntries: options.maximumEntries ?? DEFAULT_MAXIMUM_ENTRIES,
@@ -70,25 +69,6 @@ export function createCachedStreamProvider(
       cache.set(queryKey(query), structuredClone(value));
       return value;
     },
-    ...(metadataSearch === undefined
-      ? {}
-      : {
-          async searchMetadata(metadata, context) {
-            const key = mediaMetadataKey(metadata);
-            const cached = cache.get(key);
-            observeCache(options.observer, {
-              cache: 'provider-search',
-              provider: provider.name,
-              hitCount: cached.hit ? 1 : 0,
-              missCount: cached.hit ? 0 : 1,
-              correlationId: context.correlationId,
-            });
-            if (cached.hit) return structuredClone(cached.value);
-            const value = await metadataSearch(metadata, context);
-            cache.set(key, structuredClone(value));
-            return value;
-          },
-        }),
   };
 }
 
@@ -114,20 +94,4 @@ function queryKey(query: SearchQuery): string {
           query.seasonPack,
         ],
   );
-}
-
-function mediaMetadataKey(metadata: MediaMetadata): string {
-  return JSON.stringify([
-    'metadata',
-    metadata.type,
-    metadata.id,
-    metadata.originalTitle,
-    metadata.englishTitle,
-    metadata.czechTitle,
-    metadata.slovakTitle,
-    metadata.alternativeTitles,
-    metadata.year,
-    metadata.imdbId,
-    ...(metadata.type === 'series' ? [metadata.season, metadata.episode] : []),
-  ]);
 }

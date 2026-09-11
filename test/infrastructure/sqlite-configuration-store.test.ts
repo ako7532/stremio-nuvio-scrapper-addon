@@ -6,7 +6,6 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { describe, expect, it } from 'vitest';
 
-import { createConfigurationService } from '../../src/application/configuration-service.js';
 import type { StoredConfiguration } from '../../src/application/configuration-store.js';
 import { defaultConfiguration } from '../../src/domain/configuration-defaults.js';
 import { createCredentialCipher } from '../../src/infrastructure/credential-cipher.js';
@@ -21,9 +20,7 @@ describe('SQLite configuration store', () => {
     const value: StoredConfiguration = {
       id: 'opaque-configuration-id-fixture',
       configuration: defaultConfiguration(),
-      credentials: {
-        torbox: { apiKey: 'database-private-key' },
-      },
+      credentials: { torbox: { apiKey: 'database-private-key' } },
       createdAt: '2026-09-06T00:00:00.000Z',
       updatedAt: '2026-09-06T00:00:00.000Z',
     };
@@ -39,50 +36,6 @@ describe('SQLite configuration store', () => {
     expect(row.configuration_json).not.toContain('database-private-key');
     expect(row.encrypted_credentials).not.toContain('database-private-key');
     expect(row.encrypted_credentials).toMatch(/^v1\./u);
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
-  });
-
-  it('normalizes a legacy SQLite configuration without rewriting the stored row', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'czsk-legacy-config-test-'));
-    const filename = join(directory, 'config.sqlite');
-    const cipher = createCredentialCipher(randomBytes(32).toString('base64'));
-    const store = createSqliteConfigurationStore(filename, cipher);
-    const defaults = defaultConfiguration();
-    const legacy = {
-      id: 'legacy-sqlite-configuration-fixture',
-      configuration: {
-        ...defaults,
-        providers: {
-          ...defaults.providers,
-          indexers: {
-            enabled: true,
-            backend: 'prowlarr',
-            selectedIndexerIds: ['public-fixture'],
-          },
-        },
-      },
-      credentials: {
-        indexers: {
-          endpoint: 'https://legacy-indexers.invalid/base',
-          apiKey: 'legacy-indexers-key-fixture',
-        },
-      },
-      createdAt: '2026-09-06T00:00:00.000Z',
-      updatedAt: '2026-09-06T00:00:00.000Z',
-    } as unknown as StoredConfiguration;
-    await store.save(legacy);
-
-    const normalized = await createConfigurationService(store).getStored(legacy.id);
-    expect(normalized?.configuration.providers).not.toHaveProperty('indexers');
-    expect(normalized?.credentials).not.toHaveProperty('indexers');
-
-    store.close?.();
-    const database = new DatabaseSync(filename, { readOnly: true });
-    const row = database
-      .prepare('SELECT configuration_json FROM configurations WHERE id = ?')
-      .get(legacy.id) as { configuration_json: string };
-    expect(row.configuration_json).toContain('indexers');
     database.close();
     rmSync(directory, { recursive: true, force: true });
   });

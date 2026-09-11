@@ -10,8 +10,6 @@ import { installGracefulShutdown } from './infrastructure/graceful-shutdown.js';
 import { createSearchLogObserver } from './infrastructure/search-logger.js';
 import { createSqliteConfigurationStore } from './infrastructure/sqlite-configuration-store.js';
 import { buildServer } from './http/server.js';
-import { createIndexerEndpointPolicy } from './security/indexer-endpoint-policy.js';
-import type { ServerIndexerConfiguration } from './providers/indexers/server-indexer-configuration.js';
 
 const environment = parseEnvironment(process.env);
 if (environment.CONFIG_ENCRYPTION_KEY === undefined) {
@@ -20,26 +18,6 @@ if (environment.CONFIG_ENCRYPTION_KEY === undefined) {
 const store = createSqliteConfigurationStore(
   environment.CONFIG_DATABASE_PATH,
   createCredentialCipher(environment.CONFIG_ENCRYPTION_KEY),
-);
-const indexers: ServerIndexerConfiguration[] = [];
-if (environment.SCRAPE_PROWLARR && environment.PROWLARR_API_KEY !== undefined) {
-  indexers.push({
-    backend: 'prowlarr',
-    endpoint: environment.PROWLARR_URL,
-    apiKey: environment.PROWLARR_API_KEY,
-    selectedIndexerIds: environment.PROWLARR_INDEXERS,
-  });
-}
-if (environment.SCRAPE_JACKETT && environment.JACKETT_API_KEY !== undefined) {
-  indexers.push({
-    backend: 'jackett',
-    endpoint: environment.JACKETT_URL,
-    apiKey: environment.JACKETT_API_KEY,
-    selectedIndexerIds: environment.JACKETT_INDEXERS,
-  });
-}
-const indexerEndpointPolicy = createIndexerEndpointPolicy(
-  indexers.map(({ endpoint }) => new URL(endpoint).origin),
 );
 const configurationService = createConfigurationService(store);
 const playbackSecret = createHmac('sha256', environment.CONFIG_ENCRYPTION_KEY)
@@ -51,8 +29,6 @@ const integration = createProductionIntegration({
   baseUrl: environment.ADDON_BASE_URL,
   playbackSecret,
   observer: (event) => searchObserver.current?.(event),
-  indexerEndpointPolicy,
-  indexers,
 });
 const server = buildServer({
   logger: true,

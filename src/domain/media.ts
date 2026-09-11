@@ -22,7 +22,6 @@ type MetadataTitles = {
   slovakTitle?: string;
   alternativeTitles: readonly string[];
   year?: number;
-  imdbId?: string;
 };
 
 export type MediaMetadata = MediaRequest & MetadataTitles;

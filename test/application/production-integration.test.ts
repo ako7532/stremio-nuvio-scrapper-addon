@@ -251,31 +251,16 @@ describe('production integration', () => {
     expect(listTorrents).not.toHaveBeenCalled();
   });
 
-  it('assembles user providers and server-managed Indexers only with a user TorBox key', () => {
+  it('assembles SKTorrent and Webshare only when independently enabled', () => {
     const base = configuration();
     const service = configurationService(base);
     const search = vi.fn<StreamProvider['search']>().mockResolvedValue([]);
     const sktorrentProvider = vi.fn().mockReturnValue(provider('sktorrent', search));
     const webshareProvider = vi.fn().mockReturnValue(provider('webshare', search));
-    const indexersProvider = vi.fn().mockReturnValue(provider('indexers', search));
     const integration = createProductionIntegration({
       configurationService: service,
       baseUrl: 'https://addon.example/',
       playbackSecret: new Uint8Array(32).fill(5),
-      indexers: [
-        {
-          backend: 'prowlarr',
-          endpoint: 'https://prowlarr.example/',
-          apiKey: 'server-held-indexers-key',
-          selectedIndexerIds: ['public-fixture'],
-        },
-        {
-          backend: 'jackett',
-          endpoint: 'https://jackett.example/',
-          apiKey: 'server-held-jackett-key',
-          selectedIndexerIds: [],
-        },
-      ],
       factories: {
         tmdbClient: () => ({
           validateAuthentication: vi.fn(),
@@ -287,14 +272,12 @@ describe('production integration', () => {
         }),
         sktorrentProvider,
         webshareProvider,
-        indexersProvider,
       },
     });
 
     integration.searchStreamsForConfiguration(base);
     expect(sktorrentProvider).toHaveBeenCalledOnce();
     expect(webshareProvider).not.toHaveBeenCalled();
-    expect(indexersProvider).not.toHaveBeenCalled();
 
     integration.searchStreamsForConfiguration({
       ...base,
@@ -313,28 +296,6 @@ describe('production integration', () => {
     });
     expect(sktorrentProvider).toHaveBeenCalledOnce();
     expect(webshareProvider).toHaveBeenCalledOnce();
-    expect(indexersProvider).not.toHaveBeenCalled();
-
-    const torboxConfiguration: StoredConfiguration = {
-      ...base,
-      updatedAt: '2026-09-06T23:01:00.000Z',
-      configuration: {
-        ...base.configuration,
-        providers: {
-          sktorrent: { enabled: false, playbackMode: 'direct-torrent' },
-          webshare: { enabled: false },
-        },
-      },
-      credentials: { ...base.credentials, torbox: { apiKey: 'user-torbox-key' } },
-    };
-    integration.searchStreamsForConfiguration(torboxConfiguration);
-    expect(sktorrentProvider).toHaveBeenCalledOnce();
-    expect(webshareProvider).toHaveBeenCalledOnce();
-    expect(indexersProvider).toHaveBeenCalledTimes(2);
-
-    integration.invalidate(base.id);
-    integration.searchStreamsForConfiguration(torboxConfiguration);
-    expect(indexersProvider).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -374,7 +335,7 @@ function provider(name: StreamProvider['name'], search: StreamProvider['search']
     name,
     capabilities: {
       search: true,
-      source: name === 'webshare' ? 'file-hosting' : 'torrent',
+      source: name === 'sktorrent' ? 'torrent' : 'file-hosting',
       requiresAuthentication: true,
       supportsDirectStreaming: name === 'webshare',
       supportsCacheLookup: false,
