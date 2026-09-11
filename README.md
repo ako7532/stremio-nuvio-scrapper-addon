@@ -89,7 +89,7 @@ Operational references are in [deployment](./docs/DEPLOYMENT.md),
 - Compact and detailed Stremio formatting for direct torrents and opaque Webshare play URLs
 - Strict parsing of standard Stremio movie and series stream identifiers
 - Typed, bounded TorBox authentication, batched cache, torrent, and download-link transport
-- Click-deferred TorBox cache checks for selected playback, plus bounded cache enrichment for precache
+- Batched read-only TorBox cache checks for source labels and bounded cache enrichment for precache
 - Authenticated-encrypted opaque play tokens backed by expiring server-side release references
 - Read-only HEAD playback validation and idempotent GET redirect resolution
 - Episode-aware video-file selection for single files and season packs
@@ -107,9 +107,9 @@ Operational references are in [deployment](./docs/DEPLOYMENT.md),
 - Graceful shutdown, explicit reverse-proxy trust, Docker deployment, and CI quality gates
 
 Production metadata and per-user search/playback dependency wiring is assembled outside `src/main.ts`
-and reused by configuration ID plus update timestamp. Stream search does not contact TorBox, and HEAD
-only validates the opaque playback reference. TorBox account/cache/download operations begin on the
-real playback GET. After that GET has successfully resolved
+and reused by configuration ID plus update timestamp. Stream search performs only a batched, read-only
+TorBox cache lookup, and HEAD only validates the opaque playback reference. TorBox account and download
+operations begin on the real playback GET. After that GET has successfully resolved
 the selected stream, the scheduler may add only the configured number of eligible uncached alternatives.
 The selected torrent is excluded, and precache never delays or fails its playback redirect.
 Webshare's authenticated login/link flow is credential-backed and runs only on a real playback GET.

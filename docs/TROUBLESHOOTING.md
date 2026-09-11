@@ -33,8 +33,7 @@ provider result IDs or hashes, magnet links, or playback URLs.
 
 ## An uncached TorBox stream does not start immediately
 
-The source list does not contact TorBox, so cache state is decided only after the playback click. If
-adding uncached torrents is disabled, a non-cached selection is rejected without adding it. If enabled,
+The source list checks TorBox cache and hides uncached results when adding them is disabled. If enabled,
 the first real `GET /play/...` adds the torrent to the user's TorBox account. While TorBox reports that the download is not both finished and present, the
 addon redirects to a short local status video instead of waiting indefinitely. Open the same stream
 again after TorBox finishes; pending resolutions are deliberately not cached, so every retry checks the

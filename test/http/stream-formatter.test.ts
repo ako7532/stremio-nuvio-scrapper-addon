@@ -30,7 +30,7 @@ describe('Stremio stream formatter', () => {
       {
         name: 'SKTorrent 1080p',
         title:
-          'Movie.1080p.WEB-DL.SK.HEVC.EAC3.5.1.mkv\nSK 1080p WEB-DL HEVC\n2.0 GB • EAC3 • S:34 • cached',
+          'Movie.1080p.WEB-DL.SK.HEVC.EAC3.5.1.mkv\nSK 1080p WEB-DL HEVC\n2.0 GB • EAC3 • S:34',
         infoHash: 'a'.repeat(40),
         behaviorHints: { filename: result.filename },
       },
@@ -62,6 +62,7 @@ describe('Stremio stream formatter', () => {
       }),
     ]);
     expect(streams[0]).not.toHaveProperty('infoHash');
+    expect(streams[0]?.title).toContain('⚡ TorBox • CACHED');
   });
 
   it('clearly marks an uncached TorBox stream as requiring a first download attempt', () => {
@@ -73,7 +74,7 @@ describe('Stremio stream formatter', () => {
       { type: 'movie', id: 'tt0807840' },
     );
 
-    expect(streams[0]?.title).toContain('TorBox download required');
+    expect(streams[0]?.title).toContain('⬇️ TorBox • UNCACHED • download starts after click');
   });
 
   it('does not expose an unresolved multi-file series torrent', () => {

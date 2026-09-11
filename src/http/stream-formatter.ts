@@ -115,11 +115,15 @@ function displayFields(
       ? undefined
       : `${[...new Set(subtitleLanguages.map((language) => language.toUpperCase()))].join('/')} subs`,
     result.seeders === undefined ? undefined : `S:${result.seeders.toString()}`,
-    result.provider === 'sktorrent' && result.cacheStatus === 'cached' ? 'cached' : undefined,
+    result.provider === 'sktorrent' &&
+    configuration.providers.sktorrent.playbackMode === 'torbox-only' &&
+    result.cacheStatus === 'cached'
+      ? '⚡ TorBox • CACHED'
+      : undefined,
     result.provider === 'sktorrent' &&
     configuration.providers.sktorrent.playbackMode === 'torbox-only' &&
     result.cacheStatus === 'uncached'
-      ? '⏳ TorBox download required — open once, then retry'
+      ? '⬇️ TorBox • UNCACHED • download starts after click'
       : undefined,
   ].filter((value): value is string => value !== undefined && value.length > 0);
   const provider = result.provider === 'sktorrent' ? 'SKTorrent' : 'Webshare';

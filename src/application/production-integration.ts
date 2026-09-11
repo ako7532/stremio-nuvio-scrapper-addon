@@ -223,7 +223,6 @@ const assembleSearch = (
       ? {}
       : {
           cacheEnricher: createTorboxCacheEnricher(torboxClient),
-          deferCacheEnrichmentUntilPlayback: true,
           torboxPlaybackUrl: createTorboxPlaybackUrlFactory({
             baseUrl: options.baseUrl,
             configId: stored.id,
