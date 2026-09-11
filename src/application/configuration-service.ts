@@ -16,16 +16,36 @@ const languagePreferencesSchema = z.strictObject({
   allowed: z.array(z.string().trim().min(2).max(16)).max(20),
   excluded: z.array(z.string().trim().min(2).max(16)).max(20),
 });
+const legacyIndexersConfigurationSchema = z.strictObject({
+  enabled: z.boolean(),
+  backend: z.enum(['prowlarr', 'jackett']),
+  selectedIndexerIds: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(100)
+        .regex(/^[A-Za-z\d._-]+$/u),
+    )
+    .max(20),
+});
 const configurationSchema = z
   .strictObject({
     general: z.strictObject({ metadataLanguage: z.string().trim().min(2).max(16) }).optional(),
-    providers: z.strictObject({
-      sktorrent: z.strictObject({
-        enabled: z.boolean(),
-        playbackMode: z.enum(['direct-torrent', 'torbox-only']),
-      }),
-      webshare: z.strictObject({ enabled: z.boolean() }),
-    }),
+    providers: z
+      .strictObject({
+        sktorrent: z.strictObject({
+          enabled: z.boolean(),
+          playbackMode: z.enum(['direct-torrent', 'torbox-only']),
+        }),
+        webshare: z.strictObject({ enabled: z.boolean() }),
+        indexers: legacyIndexersConfigurationSchema.optional(),
+      })
+      .transform((providers) => ({
+        sktorrent: providers.sktorrent,
+        webshare: providers.webshare,
+      })),
     filters: z.strictObject({
       resolutions: z.array(z.enum(resolutions)).max(resolutions.length),
       sources: z.array(z.enum(sourceTypes)).max(sourceTypes.length),
@@ -99,11 +119,25 @@ const torboxCredentialSchema = z.strictObject({ apiKey: z.string().trim().min(1)
 const tmdbCredentialSchema = z.strictObject({
   accessToken: z.string().trim().min(1).max(2_048),
 });
+const legacyIndexersCredentialSchema = z.strictObject({
+  endpoint: z
+    .url()
+    .max(2_048)
+    .refine((value) => ['http:', 'https:'].includes(new URL(value).protocol), {
+      message: 'Indexer endpoint must use HTTP or HTTPS',
+    })
+    .refine((value) => {
+      const endpoint = new URL(value);
+      return endpoint.username === '' && endpoint.password === '' && endpoint.hash === '';
+    }, 'Indexer endpoint must not contain credentials or a fragment'),
+  apiKey: z.string().trim().min(1).max(1_024),
+});
 const credentialChangesSchema = z.strictObject({
   tmdb: tmdbCredentialSchema.nullable().optional(),
   sktorrent: sktorrentCredentialSchema.nullable().optional(),
   webshare: webshareCredentialSchema.nullable().optional(),
   torbox: torboxCredentialSchema.nullable().optional(),
+  indexers: legacyIndexersCredentialSchema.nullable().optional(),
 });
 const saveSchema = z.strictObject({
   configuration: configurationSchema,
@@ -131,11 +165,12 @@ export function createConfigurationService(store: ConfigurationStore): Configura
   return {
     async create(input, baseUrl) {
       const parsed = saveSchema.parse(input);
+      const credentials = applyCredentialChanges({}, parsed.credentials);
       const now = new Date().toISOString();
       const stored: StoredConfiguration = {
         id: randomBytes(24).toString('base64url'),
         configuration: parsed.configuration as UserConfiguration,
-        credentials: applyCredentialChanges({}, parsed.credentials),
+        credentials,
         createdAt: now,
         updatedAt: now,
       };
@@ -143,13 +178,15 @@ export function createConfigurationService(store: ConfigurationStore): Configura
       return toPublic(stored, baseUrl);
     },
     async update(id, input, baseUrl) {
-      const previous = await store.get(id);
-      if (previous === undefined) return undefined;
+      const storedPrevious = await store.get(id);
+      if (storedPrevious === undefined) return undefined;
+      const previous = normalizeStoredConfiguration(storedPrevious);
       const parsed = saveSchema.parse(input);
+      const credentials = applyCredentialChanges(previous.credentials, parsed.credentials);
       const stored: StoredConfiguration = {
         ...previous,
         configuration: parsed.configuration as UserConfiguration,
-        credentials: applyCredentialChanges(previous.credentials, parsed.credentials),
+        credentials,
         updatedAt: new Date().toISOString(),
       };
       await store.save(stored);
@@ -158,13 +195,18 @@ export function createConfigurationService(store: ConfigurationStore): Configura
     get(id, baseUrl) {
       return store
         .get(id)
-        .then((stored) => (stored === undefined ? undefined : toPublic(stored, baseUrl)));
+        .then((stored) =>
+          stored === undefined
+            ? undefined
+            : toPublic(normalizeStoredConfiguration(stored), baseUrl),
+        );
     },
     revoke(id) {
       return store.delete(id);
     },
-    getStored(id) {
-      return store.get(id);
+    async getStored(id) {
+      const stored = await store.get(id);
+      return stored === undefined ? undefined : normalizeStoredConfiguration(stored);
     },
   };
 }
@@ -173,7 +215,7 @@ function applyCredentialChanges(
   current: ProviderCredentials,
   changes: z.infer<typeof credentialChangesSchema>,
 ): ProviderCredentials {
-  const next = { ...current };
+  const next = normalizeProviderCredentials(current);
   if (changes.tmdb === null) delete next.tmdb;
   else if (changes.tmdb !== undefined) next.tmdb = changes.tmdb;
   if (changes.sktorrent === null) delete next.sktorrent;
@@ -183,6 +225,23 @@ function applyCredentialChanges(
   if (changes.torbox === null) delete next.torbox;
   else if (changes.torbox !== undefined) next.torbox = changes.torbox;
   return next;
+}
+
+function normalizeStoredConfiguration(stored: StoredConfiguration): StoredConfiguration {
+  return {
+    ...stored,
+    configuration: configurationSchema.parse(stored.configuration) as UserConfiguration,
+    credentials: normalizeProviderCredentials(stored.credentials),
+  };
+}
+
+function normalizeProviderCredentials(credentials: ProviderCredentials): ProviderCredentials {
+  return {
+    ...(credentials.tmdb === undefined ? {} : { tmdb: credentials.tmdb }),
+    ...(credentials.sktorrent === undefined ? {} : { sktorrent: credentials.sktorrent }),
+    ...(credentials.webshare === undefined ? {} : { webshare: credentials.webshare }),
+    ...(credentials.torbox === undefined ? {} : { torbox: credentials.torbox }),
+  };
 }
 
 function toPublic(stored: StoredConfiguration, baseUrl: string): PublicConfiguration {

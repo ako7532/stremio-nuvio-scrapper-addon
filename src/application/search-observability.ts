@@ -9,6 +9,17 @@ export type TorboxPrecacheStage = 'discovery' | 'selection' | 'create-torrent';
 
 export type SearchObservation =
   | {
+      type: 'indexers-provider-summary';
+      selectedIndexerCount: number;
+      eligibleIndexerCount: number;
+      queryCount: number;
+      matchedResultCount: number;
+      acquisitionAttemptCount: number;
+      acquisitionFailureCount: number;
+      returnedResultCount: number;
+      correlationId: string;
+    }
+  | {
       type: 'torbox-precache-stage';
       stage: TorboxPrecacheStage;
       outcome: 'complete' | 'failed';

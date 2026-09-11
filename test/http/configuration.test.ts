@@ -40,6 +40,10 @@ describe('configuration HTTP API', () => {
     expect(response.body).toContain('perResolution=perQualityValue');
     expect(response.body).toContain('name="safeDebug" type="checkbox"');
     expect(response.body).toContain("safeDebug:field('safeDebug').checked");
+    expect(response.body).toContain('Public Indexers are configured once on the server');
+    expect(response.body).not.toContain('name="indexersEnabled"');
+    expect(response.body).not.toContain('name="indexersEndpoint"');
+    expect(response.body).not.toContain('/api/indexers/discover');
     expect(response.body).toContain('target="_blank" rel="noreferrer"');
     expect(response.body).not.toContain('server-held-fixture-key');
     const nonce = /<script nonce="([^"]+)">/u.exec(response.body)?.[1] ?? '';
@@ -53,11 +57,74 @@ describe('configuration HTTP API', () => {
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
+  it('strips legacy per-user Indexers settings and credentials', async () => {
+    const store = memoryStore();
+    const service = createConfigurationService(store);
+    const defaults = defaultConfiguration();
+    const legacy = {
+      id: 'legacy-configuration-fixture-123',
+      configuration: {
+        ...defaults,
+        providers: {
+          ...defaults.providers,
+          indexers: {
+            enabled: true,
+            backend: 'prowlarr',
+            selectedIndexerIds: ['public-fixture'],
+          },
+        },
+      },
+      credentials: {
+        indexers: {
+          endpoint: 'https://legacy-indexers.invalid/base',
+          apiKey: 'legacy-indexers-key-fixture',
+        },
+      },
+      createdAt: '2026-09-06T00:00:00.000Z',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+    } as unknown as StoredConfiguration;
+    store.values.set(legacy.id, legacy);
+
+    const normalized = await service.getStored(legacy.id);
+
+    expect(normalized?.configuration.providers).not.toHaveProperty('indexers');
+    expect(normalized?.credentials).not.toHaveProperty('indexers');
+
+    const created = await service.create(
+      {
+        configuration: legacy.configuration,
+        credentials: {
+          indexers: {
+            endpoint: 'https://ignored-indexers.invalid/base',
+            apiKey: 'ignored-indexers-key-fixture',
+          },
+          torbox: { apiKey: 'torbox-key-fixture' },
+        },
+      },
+      'https://addon.example',
+    );
+
+    expect(created.configuration.providers).not.toHaveProperty('indexers');
+    expect(created.credentials).not.toHaveProperty('indexers');
+    expect(store.values.get(created.id)?.credentials).not.toHaveProperty('indexers');
+  });
+
+  it('does not expose a public Indexers discovery endpoint', async () => {
+    const server = buildServer();
+    servers.push(server);
+
+    const response = await server.inject({ method: 'POST', url: '/api/indexers/discover' });
+
+    expect(response.statusCode).toBe(404);
+  });
+
   it('creates, safely reads, updates, and revokes an opaque configuration', async () => {
     const store = memoryStore();
+    const invalidateConfigurationRuntime = vi.fn();
     const server = buildServer({
       configurationService: createConfigurationService(store),
       publicBaseUrl: 'https://addon.example/base/',
+      invalidateConfigurationRuntime,
     });
     servers.push(server);
     const secret = 'server-held-fixture-key';
@@ -113,12 +180,14 @@ describe('configuration HTTP API', () => {
     });
     expect(updated.json()).toMatchObject({ credentials: { torbox: { configured: false } } });
     expect(store.values.get(publicValue.id)?.credentials.torbox).toBeUndefined();
+    expect(invalidateConfigurationRuntime).toHaveBeenCalledWith(publicValue.id);
 
     const revoked = await server.inject({
       method: 'DELETE',
       url: `/api/configurations/${publicValue.id}`,
     });
     expect(revoked.json()).toEqual({ revoked: true });
+    expect(invalidateConfigurationRuntime).toHaveBeenCalledTimes(2);
     expect(
       (await server.inject({ method: 'GET', url: `/${publicValue.id}/manifest.json` })).statusCode,
     ).toBe(404);

@@ -37,6 +37,7 @@ export type NewPlaybackReference = Omit<PlaybackReference, 'id' | 'expiresAt'>;
 export type PlaybackReferenceStore = {
   put(reference: NewPlaybackReference): PlaybackReference;
   get(id: string): PlaybackReference | undefined;
+  deleteNamespace(configId: string): void;
 };
 
 export type PlaybackReferenceStoreOptions = {
@@ -93,6 +94,11 @@ export const createPlaybackReferenceStore = (
         return undefined;
       }
       return reference;
+    },
+    deleteNamespace(configId) {
+      for (const [id, reference] of references) {
+        if (reference.configId === configId) references.delete(id);
+      }
     },
   };
 };

@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "name": "Public Fixture",
+    "enable": true,
+    "supportsSearch": true,
+    "protocol": "torrent",
+    "privacy": "public"
+  },
+  {
+    "id": 2,
+    "name": "Private Fixture",
+    "enable": true,
+    "supportsSearch": true,
+    "protocol": "torrent",
+    "privacy": "private"
+  },
+  {
+    "id": 3,
+    "name": "Usenet Fixture",
+    "enable": true,
+    "supportsSearch": true,
+    "protocol": "usenet",
+    "privacy": "public"
+  }
+]

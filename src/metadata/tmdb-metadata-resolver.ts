@@ -47,6 +47,7 @@ export const createTmdbMetadataSource = (client: TmdbClient): MetadataSource => 
       slovakTitle,
       czechTitle,
       alternativeTitles: alternatives,
+      ...(/^tt\d+$/u.test(request.id) ? { imdbId: request.id } : {}),
       ...(found.year === undefined ? {} : { year: found.year }),
     };
   },
