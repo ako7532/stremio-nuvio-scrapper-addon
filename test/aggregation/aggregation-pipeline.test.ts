@@ -38,35 +38,16 @@ const configuration: UserConfiguration = {
 };
 
 describe('aggregation pipeline stages', () => {
-  it('deduplicates verified torrent identity across providers and keeps file hosting separate', () => {
+  it('deduplicates only within provider identity and keeps the strongest match', () => {
     const first = ranked(torrent('A'.repeat(40), 'Movie.1080p.mkv'), 70);
-    const stronger = ranked(
-      { ...torrent('a'.repeat(40), 'Movie.1080p.REPACK.mkv'), provider: 'indexers' },
-      90,
-    );
+    const stronger = ranked(torrent('a'.repeat(40), 'Movie.1080p.REPACK.mkv'), 90);
     const webshare = ranked(file('A'.repeat(40), 'Movie.1080p.mkv'), 80);
 
     const results = deduplicateResults([first, stronger, webshare]);
 
     expect(results).toHaveLength(2);
     expect(results[0]?.matchScore).toBe(90);
-    expect(results[0]?.result.provider).toBe('indexers');
     expect(results[1]?.result.provider).toBe('webshare');
-  });
-
-  it('preserves the original provider ranking and gives Indexers a stable lower V1 priority', () => {
-    const sktorrent = ranked(torrent('a'.repeat(40), 'Movie.1080p.WEB-DL.EN.mkv'), 90);
-    const indexers = ranked(
-      { ...torrent('b'.repeat(40), 'Movie.1080p.WEB-DL.EN.mkv'), provider: 'indexers' },
-      90,
-    );
-    const providerConfiguration: UserConfiguration = { ...configuration, ranking: ['provider'] };
-
-    expect(
-      rankResults([indexers, sktorrent], providerConfiguration).map(
-        ({ result }) => result.provider,
-      ),
-    ).toEqual(['sktorrent', 'indexers']);
   });
 
   it('applies availability, technical, term, seeder, and language filters', () => {

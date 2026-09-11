@@ -1,6 +1,5 @@
 import { MetadataNotFoundError } from '../metadata/metadata-resolver.js';
 import { TmdbTransportError } from '../metadata/tmdb-client.js';
-import { IndexerBackendError } from '../providers/indexers/indexer-backend.js';
 import { SktorrentHttpError } from '../providers/sktorrent/sktorrent-http-client.js';
 import { SktorrentParserError } from '../providers/sktorrent/sktorrent-types.js';
 import { TorboxTransportError } from '../providers/torbox/torbox-api-client.js';
@@ -82,20 +81,6 @@ export function classifyApplicationError(
   }
   if (error instanceof SktorrentParserError) {
     return new ApplicationError('ProviderUnavailable', { cause: error });
-  }
-  if (error instanceof IndexerBackendError) {
-    const kind: ApplicationErrorKind =
-      error.kind === 'authentication-failed'
-        ? 'AuthenticationFailed'
-        : error.kind === 'rate-limited'
-          ? 'RateLimited'
-          : error.kind === 'timeout'
-            ? 'ProviderTimeout'
-            : 'ProviderUnavailable';
-    return new ApplicationError(kind, {
-      cause: error,
-      ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
-    });
   }
   if (error instanceof WebshareTransportError) {
     return new ApplicationError(

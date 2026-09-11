@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { classifyApplicationError } from '../../src/application/application-error.js';
 import { MetadataNotFoundError } from '../../src/metadata/metadata-resolver.js';
-import { IndexerBackendError } from '../../src/providers/indexers/indexer-backend.js';
 import { SktorrentHttpError } from '../../src/providers/sktorrent/sktorrent-http-client.js';
 import { TorboxTransportError } from '../../src/providers/torbox/torbox-api-client.js';
 import { WebshareApiError } from '../../src/providers/webshare/webshare-xml.js';
@@ -15,8 +14,6 @@ describe('application error classification', () => {
       'AuthenticationFailed',
     ],
     [new WebshareApiError('authentication', 'private provider message'), 'AuthenticationFailed'],
-    [new IndexerBackendError('timeout', 'sanitized timeout'), 'ProviderTimeout'],
-    [new IndexerBackendError('authentication-failed', 'sanitized auth'), 'AuthenticationFailed'],
     [new DOMException('internal timeout detail', 'TimeoutError'), 'ProviderTimeout'],
     [new MetadataNotFoundError({ type: 'movie', id: 'tt0111161' }), 'MediaNotFound'],
   ])('maps provider and metadata errors to %s', (error, expectedKind) => {

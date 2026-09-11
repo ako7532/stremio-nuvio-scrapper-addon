@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ApplicationError } from '../../src/application/application-error.js';
 import { applyProviderExecutionPolicy } from '../../src/application/provider-execution-policy.js';
-import { IndexerBackendError } from '../../src/providers/indexers/indexer-backend.js';
 import { SktorrentHttpError } from '../../src/providers/sktorrent/sktorrent-http-client.js';
 import type { StreamProvider } from '../../src/providers/provider.js';
 
@@ -31,31 +30,6 @@ describe('provider execution policy', () => {
       kind: 'AuthenticationFailed',
     });
     expect(search).toHaveBeenCalledOnce();
-  });
-
-  it('preserves metadata-aware search and retries transient indexer failures', async () => {
-    const searchMetadata = vi
-      .fn()
-      .mockRejectedValueOnce(new IndexerBackendError('timeout', 'sanitized timeout'))
-      .mockResolvedValue([]);
-    const base = fixtureProvider(vi.fn().mockResolvedValue([]));
-    const provider = applyProviderExecutionPolicy(
-      { ...base, name: 'indexers', searchMetadata },
-      { retryDelayMs: 0 },
-    );
-
-    await expect(
-      provider.searchMetadata?.(
-        {
-          type: 'movie',
-          id: 'tt0000011',
-          originalTitle: 'Sintel',
-          alternativeTitles: [],
-        },
-        context(),
-      ),
-    ).resolves.toEqual([]);
-    expect(searchMetadata).toHaveBeenCalledTimes(2);
   });
 
   it('enforces a provider-operation budget with backoff', async () => {

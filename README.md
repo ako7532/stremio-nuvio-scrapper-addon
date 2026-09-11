@@ -1,8 +1,6 @@
 # Stremio / Nuvio CZ-SK scraper addon
 
-A self-hosted Stremio protocol addon that aggregates normalized stream results from SKTorrent,
-Webshare, and optional public Prowlarr/Jackett indexers, with TorBox resolution and per-user TMDB
-metadata.
+A self-hosted Stremio protocol addon that aggregates normalized stream results from SKTorrent and Webshare, with optional TorBox resolution and per-user TMDB metadata.
 
 The project has its Phase 1 skeleton, provider-independent Phase 2 parsing/matching foundation,
 fixture-backed Phase 3 SKTorrent provider, Phase 4 Webshare provider layer, and Phase 5 aggregation
@@ -39,24 +37,10 @@ base64-encoded 32-byte key; changing or losing it makes saved credentials unread
 CONFIG_ENCRYPTION_KEY=<base64-encoded 32-byte key>
 CONFIG_DATABASE_PATH=addon.sqlite
 ADDON_BASE_URL=http://127.0.0.1:7000
-SCRAPE_PROWLARR=false
-PROWLARR_URL=http://127.0.0.1:9696
-PROWLARR_API_KEY=
-PROWLARR_INDEXERS=[]
-SCRAPE_JACKETT=false
-JACKETT_URL=http://127.0.0.1:9117
-JACKETT_API_KEY=
-JACKETT_INDEXERS=[]
 ```
 
 Use HTTPS for `ADDON_BASE_URL` outside local development. Both `.env` and SQLite database files are
 ignored by Git.
-
-Public Indexers are disabled by default, configured once by the server administrator, and use
-TorBox-only playback. They do not appear as connection settings in the per-user configure page. Enable
-Prowlarr or Jackett with its `SCRAPE_*` flag and server-held credential. An empty `*_INDEXERS` array
-uses up to 20 configured, healthy public torrent indexers; a non-empty array selects explicit IDs.
-See the configuration and deployment guides before enabling a backend.
 
 The default server address is `http://127.0.0.1:7000` when accessed locally. It listens on `0.0.0.0` so it also works in a container.
 
@@ -82,9 +66,7 @@ npm run build
 See [TECHNICAL_FINDINGS.md](./TECHNICAL_FINDINGS.md) for verified provider/protocol constraints and the remaining Phase 0 validation items.
 Operational references are in [deployment](./docs/DEPLOYMENT.md),
 [configuration](./docs/CONFIGURATION.md), [security](./docs/SECURITY.md), and
-[troubleshooting](./docs/TROUBLESHOOTING.md). Public Indexers Phase I7 evidence and explicitly
-unverified live/device checks are tracked in the
-[Definition of Done matrix](./docs/INDEXERS_PHASE_I7_DOD.md).
+[troubleshooting](./docs/TROUBLESHOOTING.md).
 
 ## Implemented domain pipeline
 
@@ -104,8 +86,7 @@ unverified live/device checks are tracked in the
 - Parallel provider orchestration with isolated provider/query failures
 - Provider-specific deduplication followed by hard filters and optional cache enrichment
 - Deterministic configurable ranking and post-ranking per-resolution/total limits
-- Compact and detailed Stremio formatting with provider icons, language flags, technical facts, and
-  honest playback/cache status
+- Compact and detailed Stremio formatting for direct torrents and opaque Webshare play URLs
 - Strict parsing of standard Stremio movie and series stream identifiers
 - Typed, bounded TorBox authentication, batched cache, torrent, and download-link transport
 - Click-deferred TorBox cache checks for selected playback, plus bounded cache enrichment for precache
@@ -123,8 +104,6 @@ unverified live/device checks are tracked in the
 - Bounded metadata, provider-search, SKTorrent-detail, and TorBox-status caches
 - Per-provider concurrency, queue, operation-budget, and transient-retry policy
 - Safe provider/search/cache observations without queries, media IDs, URLs, or credentials
-- Exact-origin and DNS/IP-pinned outbound Indexers requests with redirects disabled or restricted to
-  verified magnet responses
 - Graceful shutdown, explicit reverse-proxy trust, Docker deployment, and CI quality gates
 
 Production metadata and per-user search/playback dependency wiring is assembled outside `src/main.ts`

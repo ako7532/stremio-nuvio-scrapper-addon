@@ -4,11 +4,7 @@ import { limitResults } from '../aggregation/result-limits.js';
 import { rankResults } from '../aggregation/result-ranking.js';
 import type { UserConfiguration } from '../domain/configuration.js';
 import type { MediaMetadata, MediaRequest, SearchQuery } from '../domain/media.js';
-import {
-  isTorrentProviderResult,
-  type ProviderResult,
-  type RankedResult,
-} from '../domain/release.js';
+import type { ProviderResult, RankedResult } from '../domain/release.js';
 import {
   formatStreams,
   type StremioStream,
@@ -126,7 +122,6 @@ export function createSearchStreams(dependencies: SearchStreamsDependencies): Se
       const queries = generateSearchQueries(metadata, { includeSeasonPacks: true });
       const providerResults = await searchProviders(
         providers,
-        metadata,
         queries,
         dependencies.configuration,
         context,
@@ -255,7 +250,6 @@ async function findEpisodePrecacheCandidate(
 ): Promise<RankedResult | undefined> {
   const results = await searchProviders(
     providers,
-    metadata,
     generateSearchQueries(metadata, { includeSeasonPacks: true }),
     dependencies.configuration,
     context,
@@ -263,7 +257,7 @@ async function findEpisodePrecacheCandidate(
     clock,
   );
   const matched = results.flatMap((result) => {
-    if (!isTorrentProviderResult(result)) return [];
+    if (result.provider !== 'sktorrent') return [];
     const decision = matchEpisode(metadata, result);
     if (!decision.matched || getFilterRejectionReason(result, dependencies.configuration))
       return [];
@@ -276,7 +270,7 @@ async function findEpisodePrecacheCandidate(
       : await dependencies.cacheEnricher(deduplicated, context);
   const ranked = rankResults(enriched, dependencies.configuration);
   const eligible = ranked.filter(
-    ({ result }) => isTorrentProviderResult(result) && result.cacheStatus !== 'unknown',
+    ({ result }) => result.provider === 'sktorrent' && result.cacheStatus !== 'unknown',
   );
   for (const kind of ['single-episode', 'multi-episode', 'season-pack'] as const) {
     const candidate = eligible.find(({ result }) => matchEpisode(metadata, result).kind === kind);
@@ -312,7 +306,7 @@ function playbackCandidateRejection(
       ? 'webshare playback unavailable'
       : undefined;
   }
-  if (torrentUsesTorbox(result, dependencies.configuration)) {
+  if (dependencies.configuration.providers.sktorrent.playbackMode === 'torbox-only') {
     if (dependencies.torboxPlaybackUrl === undefined) return 'torbox playback unavailable';
     if (result.magnetUri === undefined) return 'torrent magnet missing';
     return undefined;
@@ -326,7 +320,10 @@ function playbackAvailabilityRejection(
   result: ProviderResult,
   dependencies: SearchStreamsDependencies,
 ): string | undefined {
-  if (!isTorrentProviderResult(result) || !torrentUsesTorbox(result, dependencies.configuration)) {
+  if (
+    result.provider !== 'sktorrent' ||
+    dependencies.configuration.providers.sktorrent.playbackMode === 'direct-torrent'
+  ) {
     return undefined;
   }
   if (dependencies.deferCacheEnrichmentUntilPlayback === true) return undefined;
@@ -339,16 +336,13 @@ function playbackAvailabilityRejection(
 
 async function searchProviders(
   providers: readonly StreamProvider[],
-  metadata: MediaMetadata,
   queries: readonly SearchQuery[],
   configuration: UserConfiguration,
   context: SearchStreamsContext,
   observer: SearchObserver | undefined,
   clock: () => number,
 ): Promise<readonly ProviderResult[]> {
-  const enabled = providers.filter(
-    (provider) => provider.name === 'indexers' || configuration.providers[provider.name].enabled,
-  );
+  const enabled = providers.filter((provider) => configuration.providers[provider.name].enabled);
   const primaryQueries = selectDistinctTitleQueries(
     queries.filter((query) => query.fallback !== true),
   );
@@ -361,29 +355,6 @@ async function searchProviders(
       const startedAt = clock();
       const results: ProviderResult[] = [];
       let failureCount = 0;
-      if (provider.searchMetadata !== undefined) {
-        try {
-          results.push(...(await provider.searchMetadata(metadata, context)));
-        } catch (error) {
-          context.signal.throwIfAborted();
-          failureCount += 1;
-          observeSearch(observer, {
-            type: 'provider-error',
-            provider: provider.name,
-            category: classifyApplicationError(error, 'ProviderUnavailable').kind,
-            correlationId: context.correlationId,
-          });
-        }
-        observeSearch(observer, {
-          type: 'provider-complete',
-          provider: provider.name,
-          durationMs: Math.max(0, clock() - startedAt),
-          rawResultCount: results.length,
-          failureCount,
-          correlationId: context.correlationId,
-        });
-        return results;
-      }
       const queryGroups: readonly (readonly [SearchStage, readonly SearchQuery[]])[] = [
         ['precise', primaryQueries],
         ['season', fallbackQueries],
@@ -499,18 +470,13 @@ function countCacheStatuses(results: readonly RankedResult[]): {
   let unknownCount = 0;
   let notApplicableCount = 0;
   for (const { result } of results) {
-    if (!isTorrentProviderResult(result)) notApplicableCount += 1;
+    if (result.provider === 'webshare') notApplicableCount += 1;
     else if (result.cacheStatus === 'cached') cachedCount += 1;
     else if (result.cacheStatus === 'uncached') uncachedCount += 1;
     else unknownCount += 1;
   }
   return { cachedCount, uncachedCount, unknownCount, notApplicableCount };
 }
-
-const torrentUsesTorbox = (result: ProviderResult, configuration: UserConfiguration): boolean =>
-  isTorrentProviderResult(result) &&
-  (result.provider === 'indexers' ||
-    configuration.providers.sktorrent.playbackMode === 'torbox-only');
 
 function profileProviderResults(results: readonly ProviderResult[]): {
   byProvider: Readonly<Record<string, number>>;

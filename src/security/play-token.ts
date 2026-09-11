@@ -16,7 +16,7 @@ const commonClaims = {
 const claimsSchema = z.discriminatedUnion('provider', [
   z.object({
     ...commonClaims,
-    provider: z.enum(['sktorrent', 'indexers']),
+    provider: z.literal('sktorrent'),
     infoHash: z.string().regex(/^[a-f\d]{40}$/u),
     expiresAt: z.number().int().positive(),
   }),
@@ -29,7 +29,7 @@ const claimsSchema = z.discriminatedUnion('provider', [
 const newClaimsSchema = z.discriminatedUnion('provider', [
   z.object({
     ...commonClaims,
-    provider: z.enum(['sktorrent', 'indexers']),
+    provider: z.literal('sktorrent'),
     infoHash: z.string().regex(/^[a-f\d]{40}$/u),
   }),
   z.object({

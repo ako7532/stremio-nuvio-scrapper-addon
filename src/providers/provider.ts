@@ -1,4 +1,4 @@
-import type { MediaMetadata, SearchQuery } from '../domain/media.js';
+import type { SearchQuery } from '../domain/media.js';
 import type { ProviderName, ProviderResult, ProviderSource } from '../domain/release.js';
 
 export type ProviderCapabilities = {
@@ -18,8 +18,4 @@ export type StreamProvider = {
   readonly name: ProviderName;
   readonly capabilities: ProviderCapabilities;
   search(query: SearchQuery, context: ProviderSearchContext): Promise<readonly ProviderResult[]>;
-  searchMetadata?(
-    metadata: MediaMetadata,
-    context: ProviderSearchContext,
-  ): Promise<readonly ProviderResult[]>;
 };

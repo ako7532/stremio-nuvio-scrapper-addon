@@ -62,8 +62,7 @@ export type ParsedRelease = {
 };
 
 export type CacheStatus = 'cached' | 'uncached' | 'unknown';
-export type ProviderName = 'sktorrent' | 'webshare' | 'indexers';
-export type TorrentProviderName = Extract<ProviderName, 'sktorrent' | 'indexers'>;
+export type ProviderName = 'sktorrent' | 'webshare';
 export type ProviderSource = 'torrent' | 'file-hosting';
 
 type ProviderResultBase = {
@@ -84,7 +83,7 @@ type ProviderResultBase = {
 };
 
 export type TorrentProviderResult = ProviderResultBase & {
-  provider: TorrentProviderName;
+  provider: 'sktorrent';
   source: 'torrent';
   infoHash: string;
   magnetUri?: string;
@@ -100,12 +99,6 @@ export type FileProviderResult = ProviderResultBase & {
 };
 
 export type ProviderResult = TorrentProviderResult | FileProviderResult;
-
-export const isTorrentProviderResult = (result: ProviderResult): result is TorrentProviderResult =>
-  result.source === 'torrent';
-
-export const isFileProviderResult = (result: ProviderResult): result is FileProviderResult =>
-  result.source === 'file-hosting';
 
 export type RankedResult = {
   result: ProviderResult;
